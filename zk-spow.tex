@@ -42,57 +42,82 @@ We instantiate with Width-24 Poseidon2 over M31: each permutation simultaneously
 \section{Introduction}
 \label{sec:intro}
 
-We develop ZK-SPoW as a general framework and instantiate it for \textbf{Kaspa}, a PoW blockchain achieving real-time decentralization (RTD) at 100 blocks per second via the DAG KNIGHT protocol~\cite{dagknight}. Kaspa is evaluating StarkWare's Stwo---a high-performance STARK prover native to Poseidon2 over M31---making it a natural first candidate for PoW/STARK symbiosis.
+PoW blockchains waste energy on security-only computation (\S\ref{sec:pow-energy}), yet replacing it with useful work requires preserving memoryless block discovery (\S\ref{sec:memoryless})---a property fundamentally at odds with stateful computation. Prior PoUW approaches make different design tradeoffs in this direction (\S\ref{sec:pouw-direction}). ZK-SPoW inverts the relationship, extracting memoryless PoW from useful STARK computation at the permutation level (\S\ref{sec:extraction}).
 
 \subsection{The PoW Energy Problem}
+\label{sec:pow-energy}
 
-Kaspa uses kHeavyHash---cSHAKE256 (Keccak/SHA-3 family) composed with a $64\times64$ matrix multiplication over 4-bit nibbles---for proof of work. Like all traditional PoW schemes, the computational work produces no output beyond network security. The entire energy expenditure is justified solely by the security guarantees it provides.
+Traditional PoW schemes produce no output beyond network security. The entire energy expenditure is justified solely by the security guarantees it provides.
 
-\subsection{The PoUW Paradox and Its Inversion}
-\label{sec:pouw-paradox}
+We develop ZK-SPoW as a general framework and instantiate it for Kaspa~\cite{kaspa}, a PoW blockchain targeting 100~BPS via the DAGKnight protocol~\cite{dagknight}. Kaspa currently uses kHeavyHash for PoW and is evaluating StarkWare's Stwo~\cite{stwo}---a high-performance STARK prover native to Poseidon2 over M31---as a backend for verifiable programs. This combination makes Kaspa a natural first candidate: if the PoW hash is also Poseidon2, the same ASIC can serve both mining and STARK proving. Since Kaspa mining is already ASIC-dominated (kHeavyHash ASICs), \S\ref{sec:modes} and Appendix~\ref{app:asic} examine the implications of replacing the kHeavyHash pipeline with Poseidon2 at the ASIC level---sharing a single permutation unit between PoW and ZK workloads. At 100~BPS the block interval is 10~ms---the most demanding condition for header staleness and progress-freedom---making it a useful upper bound for design analysis.
 
-Ball et al.~\cite{ball2017} formalize \textbf{Proof of Useful Work (PoUW)} as a PoW scheme where the mining computation simultaneously produces useful output. Their strict definition requires:
+\subsection{The Memoryless Requirement in Proof of Work}
+\label{sec:memoryless}
+
+A PoW scheme is \emph{progress-free} (or \emph{memoryless}) if the probability of finding a valid block on any trial is independent of all previous trials. This property is fundamental:
+
 \begin{enumerate}
-\item The PoW computation itself produces useful output
-\item The verifier can confirm the usefulness
-\item The useful output is bound to the PoW evidence
+\item \textbf{Fairness.} Progress-based mining gives miners with more accumulated work a higher instantaneous success probability, undermining proportional-hashrate fairness.
+\item \textbf{Poisson block arrival.} Independent Bernoulli trials yield a Poisson block arrival process---a prerequisite for Nakamoto consensus security proofs.
+\item \textbf{Difficulty adjustment.} Memoryless trials give expected block time $1/(N \cdot H_{\mathrm{rate}} \cdot q)$. Progress introduces state-dependent variance that breaks difficulty estimation.
 \end{enumerate}
 
-The fundamental tension: PoW requires random exploration (nonce grinding), while useful computation requires specific, deterministic work. Prior PoUW constructions \cite{ball2017,ofelimos,komargodski2025,baron2025} achieve provable security for specific problem classes, but require pre-hashing, SNARGs, or domain-specific verification that limits practical deployment in high-throughput blockchains (100~BPS).
+SHA-256 (Bitcoin) and kHeavyHash (Kaspa) are memoryless by construction: each hash evaluation is independent. The challenge: useful computation (STARK proving, optimization) is inherently stateful and progressive.
 
-\textbf{ZK-SPoW inverts this relationship.} Instead of making PoW results useful, we start from useful computation (STARK proof generation) and observe that PoW tickets emerge as a natural mathematical byproduct:
+\subsection{Prior PoUW Approaches and ZK-SPoW's Direction}
+\label{sec:pouw-direction}
+
+Komargodski \& Weinstein~\cite{komargodski2025} provide the first non-trivial formalization of \textbf{Proof of Useful Work (PoUW)} and construct a protocol for arbitrary matrix multiplication with $1+o(1)$ multiplicative overhead, where miners select their own inputs (e.g., AI training workloads), building on the foundational study by Ball et~al.~\cite{ball2017}. Ofelimos~\cite{ofelimos} achieves provably secure PoUW for combinatorial optimization using SNARGs. Bar-On et~al.~\cite{baron2025} analyze equilibrium dynamics when miners receive external economic rewards for useful computation.
+
+These works operate in the direction \textbf{PoW~$\to$~useful output}: the mining computation is designed so that its result is simultaneously useful. \cite{komargodski2025} achieves near-optimal efficiency ($1+o(1)$ overhead) with protocol-enforced usefulness and domain-specific verification. The design prioritizes guaranteed useful output over memorylessness---matrix multiplication is inherently progressive (see \S\ref{sec:pouw-comparison} for detailed comparison).
+
+\textbf{ZK-SPoW takes the reverse direction} and prioritizes different properties. Instead of making PoW results useful, we start from useful computation (STARK proof generation) and observe that PoW tickets emerge as a mathematical byproduct. By operating at the granularity of a single Poseidon2 permutation (nanoseconds), each trial is independent with no sunk cost---memorylessness is preserved. Verification remains a standard \texttt{hash < target} check. The tradeoff: usefulness is market-driven rather than protocol-enforced:
 
 \begin{quote}
-\textbf{Conventional PoUW:} PoW computation $\to$ try to make results useful $\to$ fundamental constraints~\cite{ball2017}
+\textbf{Conventional PoUW:} PoW computation $\to$ make results useful $\to$ protocol-enforced usefulness, domain-specific verification~\cite{ball2017,ofelimos,komargodski2025,baron2025}
 
-\textbf{ZK-SPoW:} Useful ZK computation $\to$ PoW tickets as mathematical byproduct $\to$ no contradiction
+\textbf{ZK-SPoW:} Useful ZK computation $\to$ PoW tickets as mathematical byproduct $\to$ memorylessness, standard verification, market-driven usefulness (\S\ref{sec:pouw-comparison})
 \end{quote}
+
+More precisely: each Poseidon2 Merkle hash in the STARK prover simultaneously computes a Merkle parent (advancing the ZK proof) and produces PoW tickets (checked against the difficulty target). This dual output is a mathematical consequence of reading the same permutation output for two purposes---not a hardware trick or a protocol mandate. The STARK does not \emph{require} PoW, and the PoW does not \emph{require} the STARK; they coexist because the permutation output serves both roles.
+
+This differs from the PoUW constructions in \cite{ball2017,ofelimos,komargodski2025}: \textbf{blocks contain only the PoW hash, not the STARK proof} (\S\ref{sec:block}). The protocol does not enforce useful computation---usefulness depends on external ZK proof demand (\S\ref{sec:econ}). In \cite{komargodski2025}, miners supply their own inputs; in ZK-SPoW, proof demand must come from the market (\S\ref{sec:pouw-comparison}). However, the operating mode \emph{is} distinguishable---via nonce format conventions and mempool STARK proof correlation (\S\ref{sec:block})---if the protocol chooses to verify it.
 
 \begin{definition}[ZK-SPoW]
 A PoW scheme where the hash function is a width-extended Poseidon2 compression function operating on STARK Merkle data, such that every permutation simultaneously advances a ZK proof and produces PoW tickets.
 \end{definition}
 
-The mechanism: STARK proof generation requires millions of Merkle hashes. Each Width-24 Poseidon2 Merkle hash takes $(\mathit{left\_child}, \mathit{right\_child}, \mathit{header\_digest})$ as input and produces $(\mathit{pow\_ticket}_0, \mathit{pow\_ticket}_1, \mathit{pow\_ticket}_2)$ as output, where $\mathit{pow\_ticket}_0 = \mathit{merkle\_parent}$ simultaneously advances the ZK proof. All three output regions are checked against the difficulty target. The miner cannot choose the Merkle inputs---they are determined by the STARK computation. The ``random exploration'' required for PoW occurs naturally because STARK Merkle tree hashes are pseudorandom from the miner's perspective.
+The mechanism: STARK proof generation requires millions of Merkle hashes. Each Width-24 Poseidon2 Merkle hash takes (left child, right child, header digest) as input and produces three PoW tickets as output. Ticket~0 equals the Merkle parent and simultaneously advances the ZK proof. All three output regions are checked against the difficulty target. The miner cannot choose the Merkle inputs---they are determined by the STARK computation.
 
-\begin{definition}[Usefulness]
+\begin{definition}[Usefulness]\label{sec:pouw-paradox}
+$$U = \frac{\text{ZK-contributing trials}}{\text{total mining trials}}$$
 \begin{itemize}
-\item $U = t_0/t = 16/24 \approx 67\%$ when the ASIC is executing ZK proof computation (Symbiotic mode)
-\item $U = 0\%$ when the ASIC is grinding nonces without concurrent ZK computation (Pure PoW mode)
+\item \textbf{Continuous proving}: Every Poseidon2 permutation advances a ZK proof $\Rightarrow$ $U = 100\%$. ZK work remains useful regardless of PoW outcome.
+\item \textbf{With idle gaps}: Pure PoW fallback trials (no pending ZK work) are wasted $\Rightarrow$ $U$ decreases proportionally.
 \end{itemize}
-The 33\% overhead per permutation is the cost of PoW integration: 8 of 24 input state elements carry $\mathit{header\_digest}$ rather than ZK data. This is the inherent price of unifying ZK and PoW into a single permutation---not waste, but the cost of symbiosis. On the output side, all three 8-element regions serve as PoW tickets, and $S[0..7]$ simultaneously advances the ZK proof---the purest form of symbiosis.
-
-$U$ is a per-permutation metric. The time-averaged usefulness across all Poseidon2 cycles is $U_{\mathrm{avg}} = f_{\mathrm{sym}} \times U$, where $f_{\mathrm{sym}}$ is the fraction of cycles executing STARK Merkle hashes (determined by memory bandwidth; see \S\ref{sec:bottleneck} and \S\ref{sec:sram}).
+The per-permutation data overhead is $8/24 \approx 33\%$ (header digest occupying 8 of 24 state elements); this is the cost of PoW integration, not a usefulness loss.
 \end{definition}
 
-If a PoW solution is found mid-proof, the block is submitted without interrupting ZK computation. When no ZK demand exists, the ASIC reverts to pure PoW ($U = 0\%$), identical to any conventional miner.
+\textbf{System-level usefulness.} $U$ is a per-permutation metric. On ASIC, the Poseidon2 pipeline is compute-bound while STARK Merkle hashing is SRAM-bandwidth-limited, so only a fraction $f_{\mathrm{sym}}$ of Poseidon2 cycles execute in Symbiotic mode. The system-level time-averaged usefulness is $U_{\mathrm{sys}} = f_{\mathrm{sym}} \times U$, projected to range from ${\sim}10\%$ (SRAM) to ${\sim}98\%$ (HBM3E, compute-saturated) depending on memory configuration (\S\ref{sec:bottleneck}, Appendix~\ref{app:asic}). With pipelined proof generation, NTT and Merkle phases of different proofs overlap, and the constraint is memory bandwidth contention rather than phase sequencing.
 
-\subsection{Stwo and Poseidon2}
+\subsection{Our Solution: Permutation-Level PoW Extraction}
+\label{sec:extraction}
 
-Kaspa is evaluating StarkWare's \textbf{Stwo}~\cite{stwo} as a potential STARK backend for verifiable programs (vProgs). Stwo operates over the Mersenne field M31 and uses \textbf{Poseidon2}~\cite{poseidon2} as its internal hash function for Merkle tree commitments and Fiat-Shamir challenges.
+The central insight of ZK-SPoW is that \textbf{non-memoryless computation can produce memoryless PoW}, provided the PoW granularity is finer than the computation's internal state.
 
-This creates a unique opportunity: if the PoW hash function is also Poseidon2 over M31, then the mining ASIC's primary computational element---the Poseidon2 pipeline---can serve both STARK proof generation and PoW mining. The cost is a Poseidon2 width extension from 16 to 24 elements with increased round count ($+44$--$105\%$ core area, ${\sim}+22$--$50\%$ die area depending on implementation; see \S\ref{sec:width}).
+A STARK proof is non-memoryless: it consists of trace generation, polynomial commitment (Merkle trees), Fiat-Shamir challenges, and FRI folding---each phase depends on the previous one. A miner who has completed 80\% of a proof has ``progressed'' relative to one who has completed 20\%.
 
-\textbf{Stwo-Kaspa verifier.} Standard Stwo uses Width-16 Poseidon2 in sponge mode. Width-24 Poseidon2 is a different cryptographic function (different MDS matrix, different round count, different S-box count per external round). ZK-SPoW therefore requires a Kaspa-specific verifier supporting Width-24 compression---a parameter change within Poseidon2's design framework~\cite{poseidon2}, not a new cryptographic construction. Since the kHeavyHash $\to$ Poseidon2 transition already requires a hard fork with full-node verifier updates, the Width-24 adaptation is an incremental cost. This verifier is a prerequisite for Symbiotic mode; without it, the ASIC operates in Pure PoW mode only (\S\ref{sec:pure-pow}).
+However, ZK-SPoW does not use proof completion as the PoW event. Instead, \textbf{each individual Poseidon2 permutation within the STARK is an independent PoW trial.} Under the PRP assumption on Poseidon2:
+
+\begin{itemize}
+\item Each permutation output is pseudorandom, regardless of input structure
+\item The Merkle tree's feedback structure (parent outputs become child inputs at the next level) does not create exploitable correlation
+\item Each PoW trial takes nanoseconds (one permutation), not tens of milliseconds to seconds (one proof)
+\end{itemize}
+
+\textbf{Result:} ZK-SPoW is computationally progress-free (\S\ref{sec:progress}) despite embedding PoW within a stateful computation. Block discovery is computationally indistinguishable from a Poisson process under the PRP assumption---satisfying the prerequisite that Nakamoto consensus security proofs require~\cite{dagknight,nakamoto}.
+
+This addresses the challenge of combining useful computation with memoryless PoW---not by making the computation memoryless, but by extracting PoW at a granularity where the PRP assumption guarantees independence.
 
 \subsection{Contributions}
 \label{sec:contributions}
@@ -105,7 +130,44 @@ This creates a unique opportunity: if the PoW hash function is also Poseidon2 ov
 \item \textbf{GPU empirical validation.} We implement a complete Width-24 Poseidon2 Circle STARK prover on GPU and validate: (a)~STARK Merkle hashes produce PoW tickets as a byproduct (Appendix~\ref{sec:gpu-freetickets}); (b)~no meaningful throughput difference between random nonce and structured Merkle inputs ($99.3\% \pm 0.3\%$; Appendix~\ref{sec:gpu-invariance}).
 \end{enumerate}
 
-\textbf{Generality.} The ZK-SPoW construction---width-extended Poseidon2 compression yielding PoW tickets as a STARK byproduct---is hardware-agnostic and not specific to Kaspa. Any PoW blockchain adopting Poseidon2-based STARKs can apply the same approach. We present Kaspa as the concrete instantiation throughout: its planned Stwo integration, existing ASIC mining ecosystem, and 100~BPS throughput make it a compelling first target. The ASIC analysis (Appendix~\ref{app:asic}) demonstrates optimal-case efficiency on purpose-built hardware; the protocol functions identically on GPUs and FPGAs at proportionally lower throughput.
+% ============================================================
+\section{Progress-Freedom and Header Staleness}
+\label{sec:progress}
+
+\subsection{Computational Progress-Freedom}
+
+A PoW scheme is \emph{progress-free} if each trial's success probability is independent of all prior outcomes---i.e., the success events form an i.i.d.\ Bernoulli($q$) sequence, yielding Poisson block arrivals~\cite{nakamoto}. SHA-256 and kHeavyHash achieve this information-theoretically under the random oracle model.
+
+Poseidon2 is not a random oracle, so we use a computational relaxation: a PoW scheme is \emph{computationally progress-free} if no PPT adversary can distinguish the trial outcomes from i.i.d.\ Bernoulli($q$) with non-negligible advantage. This suffices for Nakamoto consensus security: the adversary in these proofs is PPT~\cite{nakamoto,dagknight}, so computational indistinguishability from i.i.d.\ preserves all security bounds.
+
+\textbf{Why proof-level PoW fails.} If proof completion is the PoW event, the scheme is not progress-free at any level of assumption: a miner at 80\% completion has observably higher conditional success probability than one at 10\%.
+
+\subsection{Permutation-Level Independence}
+
+ZK-SPoW defines the PoW trial at the individual Poseidon2 permutation, not the proof. Each evaluation $\pi(x_j)$ on a Merkle node input produces three PoW tickets from the 24-element output (\S\ref{sec:tickets}). The core argument is straightforward:
+
+\begin{proposition}[Computational Progress-Freedom]\label{thm:progress}
+Under the PRP assumption on Width-24 Poseidon2, the PoW success events $E_1, \ldots, E_P$ across all Merkle tree evaluations are computationally indistinguishable from i.i.d.\ Bernoulli($q$), with $q = 1 - (1-T/p^8)^3$, even given arbitrary auxiliary information $\mathrm{aux}$ derived from computation state (Merkle level, STARK phase progress, header update history).
+\end{proposition}
+
+\emph{Proof sketch.} Merkle tree inputs---full 24-element vectors $(n_L, n_R, h_H) \in \mathbb{F}_p^{24}$---are pairwise distinct except with negligible probability ($< 10^{-60}$ for $P \leq 10^7$, by union bound on PRP output collisions). For distinct inputs, the PRP assumption guarantees that $(\pi(x_1), \ldots, \pi(x_P))$ is computationally indistinguishable from independent uniform outputs. Each ticket comparison $\text{ticket} < T$ is a deterministic function of the output, so the derived events inherit independence. The PRP--PRF switching cost is $P^2/(2p^{24}) < 10^{-210}$, negligible. \qed
+
+The full proof (real--ideal reduction) and details on input distinctness, structured inputs, side information, and malicious input injection are in Appendix~\ref{app:fullproof}.
+
+\textbf{Remark (Malicious inputs).} A miner who feeds repeated or arbitrary inputs to Poseidon2 receives the same deterministic output for each repeated input---strictly reducing their ticket count. Input distinctness is a rational behavior property, not a protocol requirement.
+
+\subsection{Header Staleness}
+\label{sec:staleness}
+
+In Symbiotic mode, the header digest $h_H$ is fixed for one Merkle commitment phase. Traditional PoW has zero staleness (each hash references the latest header); ZK-SPoW introduces staleness $\Delta_{\mathrm{stale}} \leq N_{\max}/R_{\mathrm{perm}}$, where $N_{\max}$ is the largest Merkle tree size.
+
+\textbf{Concrete bound (GPU, measured):} $\Delta_{\mathrm{stale}} \approx 3.4$~ms at $\ell = 20$, 305~Mperm/s. This is the worst case---a new header arriving at the start of a Merkle phase forces the entire phase to complete with the stale header. On average, headers change mid-phase, so typical staleness is ${\sim}\Delta_{\mathrm{stale}}/2$.
+
+\textbf{Staleness relative to propagation delay.} At 100~BPS, the block interval is 10~ms, but global P2P networks exhibit propagation delays of 50--200~ms under normal conditions (and significantly longer during network congestion or partitions). In a BlockDAG~\cite{dagknight}, the relevant baseline is propagation delay, not block interval---blocks created in parallel are all included in the DAG regardless. Worst-case GPU staleness of 3.4~ms is \textbf{1.7--6.8\%} of the best-case propagation delay ($3.4/200$ -- $3.4/50$); under realistic network conditions the ratio is smaller still.
+
+\textbf{Selfish mining.} An attacker announcing blocks at phase boundaries can waste victims' partial STARK computation, but gains no PoW advantage---stale tickets remain valid. The cost is at most one phase of ZK throughput (${\sim}3.4$~ms $\times f_{\mathrm{sym}}$), not PoW security. Precision timing is impractical over 50--200~ms network jitter.
+
+\textbf{Trace size tradeoff.} Larger traces increase $\Delta_{\mathrm{stale}}$: at $\ell = 22$, $\Delta_{\mathrm{stale}} \approx 13.6$~ms (GPU), exceeding one block interval. The protocol should constrain $\ell$ such that $N_{\max}/R_{\mathrm{perm}}$ remains below the block interval.
 
 % ============================================================
 \section{Notation and Definitions}
@@ -113,6 +175,7 @@ This creates a unique opportunity: if the PoW hash function is also Poseidon2 ov
 
 \begin{table}[h]
 \centering
+\small
 \begin{tabular}{@{}ll@{}}
 \toprule
 Symbol & Definition \\
@@ -120,18 +183,32 @@ Symbol & Definition \\
 $\mathbb{F}_p$ & Finite field, $p = 2^{31}-1$ (Mersenne prime M31) \\
 $\mathrm{Poseidon2}_\pi$ & Poseidon2 permutation over $\mathbb{F}_p^t$ \\
 $t$ & State width (number of field elements in permutation) \\
-$r$ & Rate: number of input/output elements (sponge mode) \\
-$c$ & Capacity: security parameter (sponge mode; hidden elements) \\
-$n$ & Hash output size in field elements ($n = 8$, giving 248 bits) \\
 $H$ & Block header (all consensus fields; see \S\ref{sec:block}) \\
 $h_H$ & Header digest: $\mathrm{PoseidonSponge}(H \text{ excluding nonce}) \in \mathbb{F}_p^k$ \\
 $k$ & Header digest element count ($k = 8$ for symmetric I/O and three PoW tickets) \\
 $(v_1, v_2)$ & Nonce: $v_1, v_2 \in \mathbb{F}_p^8$ \\
-$T$ & Target $\in \mathbb{F}_p^8$ (difficulty-adjusted) \\
+$T$ & Difficulty target (integer; 8 M31 elements interpreted as 248-bit big-endian value) \\
+$p_t$ & Single-ticket success probability: $p_t = T/p^8$ (see Remark below) \\
+$q$ & Per-permutation success probability: $q = 1 - (1-p_t)^3$ \\
 $S$ & Poseidon2 state after permutation, $S \in \mathbb{F}_p^t$ \\
-$U$ & Per-permutation usefulness: $t_0/t$ ($t_0$ useful elements in width-$t$ state) \\
+$N$ & Number of miners in the network \\
+$N_i$ & Number of leaves in Merkle commitment phase $i$ \\
+$N_{\mathrm{spow}}$ & Number of ZK-SPoW miners (subset of $N$) \\
+$m$ & Number of FRI folding rounds \\
+$P$ & Total Poseidon2 permutations across all STARK phases: $P = \sum_{i=0}^{m}(N_i - 1)$ \\
+$\ell$ & Trace size exponent (trace has $2^\ell$ rows) \\
+$U$ & Per-permutation usefulness: ZK-contributing trials / total mining trials (\S\ref{sec:pouw-direction}) \\
+$U_{\mathrm{sys}}$ & System-level time-averaged usefulness: $f_{\mathrm{sym}} \times U$ \\
+$d$ & S-box exponent ($x \mapsto x^d$; $d = 5$ for Poseidon2) \\
 $f_{\mathrm{sym}}$ & Fraction of Poseidon2 cycles executing STARK Merkle hashes \\
-$U_{\mathrm{avg}}$ & Time-averaged usefulness: $f_{\mathrm{sym}} \times U$ \\
+$\mathcal{H}$ & Total PoW hashrate (network-wide) \\
+$R_{\mathrm{perm}}$ & Permutation throughput (permutations per second) \\
+$K$ & Number of distinct traces in multi-trial grinding analysis (Appendix~\ref{app:tracegrinding}) \\
+$B$ & Block reward \\
+$Z$ & ZK proof throughput (proofs per second per miner) \\
+$F$ & Fee per ZK proof \\
+$D$ & Network-wide ZK proof demand (proofs per second) \\
+$\alpha$ & Pure PoW efficiency advantage over ZK-SPoW ASIC ($\alpha \approx 1.1$--$1.2$) \\
 \bottomrule
 \end{tabular}
 \caption{Notation summary.}
@@ -151,16 +228,18 @@ Hash output & 8 elements = 248 bits \\
 Standard width & $t_0 = 16$ (sponge mode: rate 8, capacity 8) \\
 External rounds $R_f$ & 8 (4 + 4) \\
 Internal rounds $R_p$ & 14 \\
-S-box exponent & $\alpha = 5$ \\
+S-box exponent & $d = 5$ \\
 Merkle hash & 2 permutations per node (sponge: absorb left[8], absorb right[8]) \\
-Commitment hash & Blake2s (base layer), Poseidon2 (recursive proofs) \\
+Commitment hash & Blake2s (base layer), Poseidon over Felt252 (recursive proofs) \\
 \bottomrule
 \end{tabular}
 \caption{Stwo baseline Poseidon2 parameters.}
 \label{tab:stwo-baseline}
 \end{table}
 
-\textbf{Note:} All security claims in this paper assume final production round constants. The current Stwo implementation uses placeholder values (\texttt{EXTERNAL\_ROUND\_CONSTS} and \texttt{INTERNAL\_ROUND\_CONSTS} uniformly set to \texttt{1234}; see \S\ref{sec:open}).
+\textbf{Note:} All security claims in this paper assume final production round constants. As of writing, production round constants for Poseidon2 over M31 have not been finalized; the Stwo implementation uses development placeholders (\texttt{EXTERNAL\_ROUND\_CONSTS} and \texttt{INTERNAL\_ROUND\_CONSTS} uniformly set to \texttt{1234}).
+
+\textbf{Remark (Probability space).} Each ticket is an element of $\mathbb{F}_p^8$, which has $p^8$ elements---not $2^{248}$. Ticket comparison and the difficulty target $T$ operate in the natural ordering of $\mathbb{F}_p^8$ (lexicographic, with each element in $\{0, \ldots, p-1\}$). The success probability is therefore $p_t = T/p^8$. The approximation $p^8 \approx 2^{248}$ introduces a relative error of $1 - (p/2^{31})^8 = 1 - ((2^{31}-1)/2^{31})^8 \approx 8 \cdot 2^{-31} \approx 3.7 \times 10^{-9}$, which is negligible for all practical difficulty targets. Throughout this paper we use the exact definition $p_t = T/p^8$; the notation ``248-bit'' refers to the bit-length of the representation, not the exact cardinality of the probability space.
 
 % ============================================================
 \section{Protocol Specification}
