@@ -98,13 +98,11 @@ This creates a unique opportunity: if the PoW hash function is also Poseidon2 ov
 \label{sec:contributions}
 
 \begin{enumerate}
-\item \textbf{PoUW paradox inversion.} We formalize ZK-Symbiotic Proof of Work, a construction where useful ZK computation (STARK Merkle hashing) naturally produces PoW tickets as a cryptographically bound byproduct---inverting the traditional PoUW direction explored by Ball et al.~\cite{ball2017}, Ofelimos~\cite{ofelimos}, and Komargodski et al.~\cite{komargodski2025,baron2025} (\S\ref{sec:pouw-paradox}).
+\item \textbf{Memoryless PoW from non-memoryless computation.} We formalize \emph{computational} progress-freedom for PoW schemes embedded in stateful computations and prove that ZK-SPoW achieves it under the PRP assumption on Poseidon2 (Theorem~1, \S\ref{sec:progress}). Header staleness is bounded to one Merkle commitment phase (${\sim}3$~ms GPU (measured)).
 
-\item \textbf{Width-24 Poseidon2 parameterization.} We specify Width-24 Poseidon2 over M31 in compression function mode (1~permutation per Merkle hash, vs 2 in sponge mode) and verify its security parameters: $R_p = 22$ internal rounds for 128-bit security with $D = 5$, computed via Plonky3's round number formula~\cite{plonky3} (\S\ref{sec:width24sec}).
+\item \textbf{Width-24 Poseidon2 in compression function mode.} We specify Width-24 Poseidon2 over M31 (1~permutation per Merkle hash, vs 2 in sponge mode) with $R_p = 22$ internal rounds targeting 128-bit security (\S\ref{sec:width24sec}). The 24-element output naturally partitions into a Merkle parent (advancing the ZK proof) and two additional PoW tickets---the dual-purpose output that makes ZK-SPoW possible (\S\ref{sec:compression}--\S\ref{sec:tickets}).
 
-\item \textbf{Complementary bottleneck architecture.} We demonstrate that PoW mining (compute-bound) and STARK proof generation (memory-bound) can share Poseidon2 hardware with zero-cycle switching overhead, and provide gate-level ASIC architecture analysis for a 7\,nm implementation (\S\ref{sec:modes}, Appendix~\ref{app:asic}).
-
-\item \textbf{GPU empirical validation.} We implement a complete Width-24 Poseidon2 Circle STARK prover on GPU and validate two core claims: (a)~STARK Merkle hashes produce PoW tickets as a computational byproduct---hashrate goes from 0 (pure ZK) to positive (ZK-SPoW) (\S\ref{sec:symbiotic}, Appendix~\ref{sec:gpu-freetickets}); (b)~no meaningful throughput difference is observed between random nonce and structured Merkle input sources on GPU, consistent with Poseidon2 arithmetic dominating execution time (Appendix~\ref{sec:gpu-invariance}).
+\item \textbf{GPU empirical validation.} We implement a complete Width-24 Poseidon2 Circle STARK prover on GPU and validate: (a)~STARK Merkle hashes produce PoW tickets as a byproduct (Appendix~\ref{sec:gpu-freetickets}); (b)~no meaningful throughput difference between random nonce and structured Merkle inputs ($99.3\% \pm 0.3\%$; Appendix~\ref{sec:gpu-invariance}).
 \end{enumerate}
 
 \textbf{Generality.} The ZK-SPoW construction---width-extended Poseidon2 compression yielding PoW tickets as a STARK byproduct---is hardware-agnostic and not specific to Kaspa. Any PoW blockchain adopting Poseidon2-based STARKs can apply the same approach. We present Kaspa as the concrete instantiation throughout: its planned Stwo integration, existing ASIC mining ecosystem, and 100~BPS throughput make it a compelling first target. The ASIC analysis (Appendix~\ref{app:asic}) demonstrates optimal-case efficiency on purpose-built hardware; the protocol functions identically on GPUs and FPGAs at proportionally lower throughput.
@@ -610,7 +608,15 @@ Independence & PoW $\neq$ STARK & PoW = STARK \\
 \label{tab:dependency}
 \end{table}
 
-\textbf{Risk:} A cryptographic break in Poseidon2 compromises both PoW security and STARK validity simultaneously. This concentration risk is shared with the broader Poseidon2 ecosystem (notably Starknet).
+\textbf{Correlated failure mode.} A cryptographic break in Poseidon2 compromises both PoW security and STARK validity simultaneously---a qualitatively different risk profile from traditional designs where PoW and STARK use independent primitives. We assess this risk quantitatively:
+
+\begin{itemize}
+\item \textbf{Current margin.} The 30-round configuration ($R_f = 8$, $R_p = 22$) includes a $+2$ external round margin and $\times 1.075$ internal round margin over the minimum required by known attacks. Merz and Rodr{\'\i}guez Garc{\'\i}a~\cite{skipping2026} improve algebraic collision attacks by $2^{106}$ for one parameter set but note that this ``does not mean the primitive falls short of its claimed security level.'' Even applying this $2^{106}$ improvement to the CICO estimate of ${\sim}2^{251}$ (\S\ref{sec:width24sec}) yields ${\sim}2^{145}$---still $2^{17}$ above the 128-bit threshold, requiring a further ${\sim}131{,}000\times$ improvement to reach $2^{128}$. Resultant-based attacks~\cite{resultant2026} solve Poseidon2 instances with up to 10 total rounds ($d = 3$, KoalaBear) and 7 rounds ($d = 5$, M31)---far below the 30-round configuration.
+
+\item \textbf{Margin erosion trajectory.} The attack improvement of~\cite{skipping2026} targets the sparse structure of $M_I$, a design feature inherent to Poseidon2. Further advances along this line are plausible. From a round-based perspective,~\cite{resultant2026} breaks Poseidon2 instances with up to 10 rounds ($d = 3$) and 7 rounds ($d = 5$, the S-box degree used by our configuration)---leaving a gap of at least 20 rounds to the 30-round target. If a future attack reduces security below $2^{128}$ for Width-24/30-round, both PoW and STARK would require parameter updates simultaneously.
+
+\item \textbf{Fallback strategy.} Because Poseidon2 serves both PoW and STARK, a break compromises both simultaneously---unlike traditional designs where PoW and STARK hash functions fail independently. A practical mitigation is a protocol-level automatic fallback: if the difficulty adjustment detects anomalous block arrival rates (consistent with a broken hash function), the chain switches to a pre-configured backup hash (e.g., kHeavyHash) for PoW without requiring a hard fork. ZK-SPoW functionality is suspended during the transition, but PoW consensus continues uninterrupted. A subsequent hard fork can then migrate the STARK layer to a replacement hash and restore Symbiotic mode. This two-phase approach---automatic PoW fallback followed by planned STARK migration---limits the window of vulnerability to the detection latency of the difficulty adjustment mechanism.
+\end{itemize}
 
 \subsection{Width-24 Security}
 \label{sec:width24sec}
@@ -619,11 +625,31 @@ Independence & PoW $\neq$ STARK & PoW = STARK \\
 
 \textbf{STARK soundness.} The $\mathit{header\_digest}$ acts as a fixed salt in each Merkle hash: it is determined by the block header before proof generation begins and cannot be chosen adaptively by the prover. STARK soundness therefore reduces to collision resistance of the Width-24 compression function with a fixed third input---a strictly easier assumption than collision resistance under adversarially chosen inputs. The Stwo-Kaspa verifier reconstructs Merkle nodes using the same $\mathit{header\_digest}$, preserving the binding property.
 
-\textbf{Preimage resistance (PoW security).} PoW requires only preimage resistance of the 248-bit output. The 30-round Poseidon2 permutation (8 external + 22 internal) satisfies this: no known attack reduces the preimage search below the generic $2^{248}$ bound, and the round count follows Plonky3's security formula with margin~\cite{plonky3}.
+\textbf{PoW security.} Under the PRP assumption, finding an input whose output satisfies ticket ${<}\;T$ requires expected $1/p_t$ evaluations---no better strategy than random trials exists. No published algebraic attack on the 30-round permutation (8 external + 22 internal) is known to the authors for this parameter set.
 
-\textbf{$R_p$ for Width-24.} The internal round count increases from $R_p = 14$ (Width-16) to $R_p = 22$ (Width-24) for 128-bit security at $D = 5$ over M31. This is computed via Plonky3's round number formula~\cite{plonky3}, which applies the security constraints from \cite{poseidon,poseidon2} plus the algebraic attack bound from Khovratovich et al.\ (ePrint 2023/537), with a security margin of $R_f \mathrel{{+}{=}} 2$, $R_p \times 1.075$. The binding constraint is statistical ($R_f \geq 6$). Total rounds: 30 ($8 + 22$) vs 22 ($8 + 14$) for Width-16. S-box operations per permutation increase by 51\% (214 vs 142); however, compression function mode requires only 1~permutation per Merkle hash (vs 2 in sponge mode), yielding 25\% fewer S-boxes per hash (214 vs $2 \times 142 = 284$). Supplementary verification: $M_I^k$ is invertible for all $k = 1..48$ (necessary condition for subspace trail resistance~\cite{poseidon2}). Diffusion analysis confirms full input-to-output dependency from the first external round. Algebraic degree after the full 30-round permutation exceeds $2^{69}$, well above the $2^{64}$ threshold for interpolation security at 128 bits.
+\textbf{$R_p$ for Width-24.} $R_p = 22$, targeting 128-bit security at $d = 5$ over M31, computed via Plonky3's round number formula~\cite{plonky3}. The formula applies six security constraints from~\cite{poseidon,poseidon2} (statistical, interpolation, three Gr\"obner basis variants) plus the algebraic attack bound from~\cite{khovratovich2023}, then adds margin: $R_f \mathrel{{+}{=}} 2$, $R_p \times 1.075$. Pre-margin optimum: $(R_f, R_p) = (6, 20)$; post-margin: $(8, 22)$. The binding constraints are statistical ($R_{f,1} = 6$, since $M = 128 \leq \lfloor \log_2 p - 2 \rfloor \times (t+1) = 700$) and Gr\"obner-2 ($R_{f,4} = 6$), tied. \textbf{Crucially, the formula depends only on $(p, t, d, M)$---capacity is not a parameter} (see \S\ref{sec:security}). Total rounds: 30 ($8 + 22$). S-box operations: $t \times R_f + R_p = 24 \times 8 + 22 = 214$ per permutation; in compression function mode, this yields 25\% fewer S-boxes per Merkle hash than Width-16 sponge ($214$ vs $2 \times 142 = 284$). Supplementary: $M_I^k$ is invertible for $k = 1..48$ (subspace trail resistance). Algebraic degree after 30 rounds exceeds $2^{69}$ ($5^{30} \approx 2^{69.7}$), far above the interpolation threshold of $2^{\min(M,\, n)} = 2^{31}$ for M31; the interpolation constraint is non-binding.
 
-\textbf{Recent cryptanalysis.} Merz and Rodr{\'\i}guez Garc{\'\i}a~\cite{skipping2026} improve algebraic CICO attacks on Poseidon2 by exploiting $M_I$'s sparse structure (round-skipping). For one recommended 128-bit parameter set, the improvement is $2^{106}$ over prior art; however, the authors note that the full-round primitive ``does not fall short of its claimed security level.'' Separately, resultant-based attacks~\cite{resultant2026} solve small-scale Poseidon2-M31 bounty instances ($R_f \leq 6$, $R_p \leq 4$; $\leq$10 total rounds). These results do not affect the 30-round ($8{+}22$) configuration: the security margin ($R_f{+}{=}2$, $R_p \times 1.075$) absorbs the improved attack complexities.
+\textbf{CICO complexity in compression mode.} A Constrained-Input Constrained-Output (CICO) attacker on the compression function seeks $x \in \mathbb{F}_p^{24}$ satisfying partial output constraints on $\pi(x)$. Modeling via intermediate S-box variables~\cite{poseidon}: the 30-round permutation yields a polynomial system of $n \approx 238$ variables and 238 equations of degree ${\leq}\,5$ ($24$ input unknowns $+ 8 \times 24$ full-round $+ 22$ partial-round S-box intermediates). Gr\"obner basis complexity is $\binom{n + d_{\mathrm{reg}}}{d_{\mathrm{reg}}}^{\omega}$, where $d_{\mathrm{reg}}$ is the degree of regularity. Experimental estimates on Poseidon instances yield $d_{\mathrm{reg}} \approx R_f/2 + R_p + 2 = 28$ for 30 rounds. With $n = 238$ and $\omega = 2$ (conservative):
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+$d_{\mathrm{reg}}$ & Complexity & Interpretation \\
+\midrule
+28 (extrapolated) & ${\sim}2^{251}$ & Heuristic $R_f/2 + R_p + 2$; no Width-24/M31 data \\
+20 & ${\sim}2^{196}$ & Requires neutralizing ${\sim}8$ effective rounds \\
+14 & ${\sim}2^{150}$ & Requires structural advance beyond~\cite{skipping2026} \\
+$\leq 11$ & $\leq 2^{124}$ & Below 128-bit security threshold \\
+\bottomrule
+\end{tabular}
+\caption{CICO complexity sensitivity to $d_{\mathrm{reg}}$.}
+\label{tab:cico}
+\end{table}
+
+Reaching the security threshold ($d_{\mathrm{reg}} \leq 11$) requires reducing the effective degree of regularity to less than 40\% of the extrapolated value---equivalently, an attack must neutralize the algebraic contribution of the majority of the 30 rounds. The degree of regularity is determined by the round structure (S-box degree growth and MDS mixing); full state visibility does not change the round structure but does expose more equations to the attacker. Width-24's larger state introduces more intermediate variables than narrower configurations, increasing Gr\"obner basis dimension, though~\cite{skipping2026} shows that operation mode can affect practical attack complexity independently of $d_{\mathrm{reg}}$. Note: $d_{\mathrm{reg}} = 28$ is extrapolated from small-instance experiments on narrower Poseidon variants; the exact value for Width-24 over M31 has not been computed (\S\ref{sec:open}).
+
+\textbf{Recent cryptanalysis.} See~\S\ref{sec:security} (Current margin) for detailed analysis of~\cite{skipping2026} and~\cite{resultant2026}.
 
 \subsection{PoW Hash Distribution}
 \label{sec:pow-dist}
