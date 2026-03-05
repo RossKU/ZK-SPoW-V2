@@ -125,7 +125,7 @@ This addresses the challenge of combining useful computation with memoryless PoW
 \begin{enumerate}
 \item \textbf{Memoryless PoW from non-memoryless computation.} We formalize \emph{computational} progress-freedom for PoW schemes embedded in stateful computations and prove that ZK-SPoW achieves it under the PRP assumption on Poseidon2 (Theorem~1, \S\ref{sec:progress}). Header staleness is bounded to one Merkle commitment phase (${\sim}3$~ms GPU (measured)).
 
-\item \textbf{Width-24 Poseidon2 in compression function mode.} We specify Width-24 Poseidon2 over M31 (1~permutation per Merkle hash, vs 2 in sponge mode) with $R_p = 22$ internal rounds targeting 128-bit security (\S\ref{sec:width24sec}). The 24-element output naturally partitions into a Merkle parent (advancing the ZK proof) and two additional PoW tickets---the dual-purpose output that makes ZK-SPoW possible (\S\ref{sec:compression}--\S\ref{sec:tickets}).
+\item \textbf{Width-24 Poseidon2 in compression function mode.} We specify Width-24 Poseidon2 over M31 (1~permutation per Merkle hash, vs 2 in sponge mode) with $R_p = 22$ internal rounds targeting 128-bit security (\S\ref{sec:width24sec}). The 24-element output naturally partitions into a Merkle parent (advancing the ZK proof) and two additional PoW tickets---the dual-purpose output that makes ZK-SPoW possible (\S\ref{sec:width}--\S\ref{sec:io}).
 
 \item \textbf{GPU empirical validation.} We implement a complete Width-24 Poseidon2 Circle STARK prover on GPU and validate: (a)~STARK Merkle hashes produce PoW tickets as a byproduct (Appendix~\ref{sec:gpu-freetickets}); (b)~no meaningful throughput difference between random nonce and structured Merkle inputs ($99.3\% \pm 0.3\%$; Appendix~\ref{sec:gpu-invariance}).
 \end{enumerate}
@@ -135,6 +135,7 @@ This addresses the challenge of combining useful computation with memoryless PoW
 \label{sec:progress}
 
 \subsection{Computational Progress-Freedom}
+\label{sec:comp-progress}
 
 A PoW scheme is \emph{progress-free} if each trial's success probability is independent of all prior outcomes---i.e., the success events form an i.i.d.\ Bernoulli($q$) sequence, yielding Poisson block arrivals~\cite{nakamoto}. SHA-256 and kHeavyHash achieve this information-theoretically under the random oracle model.
 
@@ -143,8 +144,9 @@ Poseidon2 is not a random oracle, so we use a computational relaxation: a PoW sc
 \textbf{Why proof-level PoW fails.} If proof completion is the PoW event, the scheme is not progress-free at any level of assumption: a miner at 80\% completion has observably higher conditional success probability than one at 10\%.
 
 \subsection{Permutation-Level Independence}
+\label{sec:perm-independence}
 
-ZK-SPoW defines the PoW trial at the individual Poseidon2 permutation, not the proof. Each evaluation $\pi(x_j)$ on a Merkle node input produces three PoW tickets from the 24-element output (\S\ref{sec:tickets}). The core argument is straightforward:
+ZK-SPoW defines the PoW trial at the individual Poseidon2 permutation, not the proof. Each evaluation $\pi(x_j)$ on a Merkle node input produces three PoW tickets from the 24-element output (\S\ref{sec:io}). The core argument is straightforward:
 
 \begin{theorem}[Computational Progress-Freedom]\label{thm:progress}
 Under the PRP assumption on Width-24 Poseidon2, the PoW success events $E_1, \ldots, E_P$ across all Merkle tree evaluations are computationally indistinguishable from i.i.d.\ Bernoulli($q$), with $q = 1 - (1-T/p^8)^3$, even given arbitrary auxiliary information $\mathrm{aux}$ derived from computation state (Merkle level, STARK phase progress, header update history).
@@ -203,7 +205,7 @@ $d$ & S-box exponent ($x \mapsto x^d$; $d = 5$ for Poseidon2) \\
 $f_{\mathrm{sym}}$ & Fraction of Poseidon2 cycles executing STARK Merkle hashes \\
 $\mathcal{H}$ & Total PoW hashrate (network-wide) \\
 $R_{\mathrm{perm}}$ & Permutation throughput (permutations per second) \\
-$K$ & Number of distinct traces in multi-trial grinding analysis (Appendix~\ref{app:tracegrinding}) \\
+$K$ & Number of distinct traces in multi-trial grinding analysis (Appendix~B.5) \\
 $B$ & Block reward \\
 $Z$ & ZK proof throughput (proofs per second per miner) \\
 $F$ & Fee per ZK proof \\
@@ -536,6 +538,7 @@ where $\epsilon \approx 0.02$ accounts for proof setup, FRI round transitions, a
 \label{sec:security}
 
 \subsection{Poseidon2 Cryptographic Properties}
+\label{sec:crypto-props}
 
 \textbf{Sponge mode vs compression function mode.} Poseidon2~\cite{poseidon2} provides 128-bit security in sponge mode via an indifferentiability argument: with capacity $c = 8$ M31 elements (248 bits), the sponge construction is indifferentiable from a random oracle up to $2^{124}$ queries. ZK-SPoW operates in compression function mode (\S\ref{sec:width}), where all 24 input elements are visible---there is no hidden capacity. Security in this mode relies on different, more direct properties of the permutation $\pi$:
 
@@ -609,7 +612,7 @@ $\leq 11$ & $\leq 2^{124}$ & Below 128-bit security threshold \\
 
 Reaching the security threshold ($d_{\mathrm{reg}} \leq 11$) requires reducing the effective degree of regularity to less than 40\% of the extrapolated value---equivalently, an attack must neutralize the algebraic contribution of the majority of the 30 rounds. The degree of regularity is determined by the round structure (S-box degree growth and MDS mixing); full state visibility does not change the round structure but does expose more equations to the attacker. Width-24's larger state introduces more intermediate variables than narrower configurations, increasing Gr\"obner basis dimension, though~\cite{skipping2026} shows that operation mode can affect practical attack complexity independently of $d_{\mathrm{reg}}$. Note: $d_{\mathrm{reg}} = 28$ is extrapolated from small-instance experiments on narrower Poseidon variants; the exact value for Width-24 over M31 has not been computed (\S\ref{sec:open}).
 
-\textbf{Recent cryptanalysis.} See~\S\ref{sec:security} (Current margin) for detailed analysis of~\cite{skipping2026} and~\cite{resultant2026}.
+\textbf{Recent cryptanalysis.} See~\S\ref{sec:crypto-props} (Current margin) for detailed analysis of~\cite{skipping2026} and~\cite{resultant2026}.
 
 \subsection{Trace Grinding Resistance}
 \label{sec:tracegrind}
@@ -619,11 +622,11 @@ Trace selection in Symbiotic mode provides zero advantage for PoW mining under t
 Under PRP, three invariants hold:
 
 \begin{enumerate}
-\item \textbf{Ticket count invariance.} Total permutations $P = \sum_{i=0}^{m}(N_i - 1)$ is protocol-determined and trace-independent. The miner cannot increase ticket count by selecting a different trace (Appendix~\ref{app:tracegrinding}).
+\item \textbf{Ticket count invariance.} Total permutations $P = \sum_{i=0}^{m}(N_i - 1)$ is protocol-determined and trace-independent. The miner cannot increase ticket count by selecting a different trace (Appendix~B.2).
 
-\item \textbf{Distribution invariance.} The number of valid tickets follows $V \sim \mathrm{Binomial}(P, q)$, where both $P$ and $q = 1 - (1-p_t)^3$ are trace-independent. The \emph{entire distribution} is invariant under trace selection (Appendix~\ref{app:tracegrinding}).
+\item \textbf{Distribution invariance.} The number of valid tickets follows $V \sim \mathrm{Binomial}(P, q)$, where both $P$ and $q = 1 - (1-p_t)^3$ are trace-independent. The \emph{entire distribution} is invariant under trace selection (Appendix~B.3).
 
-\item \textbf{Grinding is dominated.} Header digest grinding is equivalent to nonce grinding at equal cost (Appendix~\ref{app:tracegrinding}). Multi-trial grinding ($K$ traces, best-of-$K$) is strictly dominated by $K \times P$ pure PoW permutations (Appendix~\ref{app:tracegrinding}). Merkle tree feedback does not violate PRP (Appendix~\ref{app:tracegrinding}).
+\item \textbf{Grinding is dominated.} Header digest grinding is equivalent to nonce grinding at equal cost (Appendix~B.4). Multi-trial grinding ($K$ traces, best-of-$K$) is strictly dominated by $K \times P$ pure PoW permutations (Appendix~B.5). Merkle tree feedback does not violate PRP (Appendix~B.6).
 \end{enumerate}
 
 \subsection{Triple-Ticket Independence}
@@ -767,7 +770,7 @@ $U$ (per-perm) & 0\% & ${\sim}1/N$ & ${\sim}1/N$ & \textbf{100\%} ($U_{\mathrm{s
 \label{tab:memoryless}
 \end{table}
 
-ZK-SPoW operates at the finest practical granularity---individual permutations (nanoseconds)---achieving computational progress-freedom analogous to the information-theoretic progress-freedom of traditional hash-based PoW (Theorem~1, \S\ref{sec:progress}). The cost: the PRP assumption on Poseidon2 replaces the random oracle assumption on traditional hash functions.
+ZK-SPoW operates at the finest practical granularity---individual permutations (nanoseconds)---achieving computational progress-freedom analogous to the information-theoretic progress-freedom of traditional hash-based PoW (Theorem~1, \S\ref{sec:perm-independence}). The cost: the PRP assumption on Poseidon2 replaces the random oracle assumption on traditional hash functions.
 
 % ============================================================
 \section{Open Questions}
@@ -1085,7 +1088,7 @@ Random Excursions Variant (18 states) & 17/18 pass & 0.0320$^\dagger$ & PASS \\
 \label{tab:nist}
 \end{table}
 
-P-value$_T$: uniformity ($\chi^2$ on 10-bin histogram; pass if $> 0.0001$). $^\dagger$Worst across sub-tests. Non-overlapping Template: $N = 8$, $M = 125{,}000$ per NIST STS~2.1.2. REV state $x = +3$: 53/56 (threshold 54), consistent with 18-state false positive rate ($P \approx 10\%$). Linear Complexity: corrected $\pi_6 = 1/48$ (NIST STS~2.1.2 bug: $\pi_6 = 1/32$, $\sum \pi_i > 1$).
+P-value$_T$: \S4.2.2 uniformity ($\chi^2$ on 10-bin histogram; pass if $> 0.0001$). $^\dagger$Worst across sub-tests. Non-overlapping Template: $N = 8$, $M = 125{,}000$ per NIST STS~2.1.2. REV state $x = +3$: 53/56 (threshold 54), consistent with 18-state false positive rate ($P \approx 10\%$). Linear Complexity: corrected $\pi_6 = 1/48$ (NIST STS~2.1.2 bug: $\pi_6 = 1/32$, $\sum \pi_i > 1$).
 
 \textbf{Inter-ticket independence} (100,000 permutations, 3 tickets: $S[0..7]$, $S[8..15]$, $S[16..23]$):
 \begin{itemize}
@@ -1101,7 +1104,7 @@ Tested with SplitMix64-derived round constants. Reproducible: \texttt{analysis/n
 \label{app:proof}
 \label{app:fullproof}
 
-This appendix contains the complete proof of Theorem~1 (\S\ref{sec:progress}) and supporting remarks deferred from the main text.
+This appendix contains the complete proof of Theorem~1 (\S\ref{sec:perm-independence}) and supporting remarks deferred from the main text.
 
 \textbf{Setup.} Let $\pi: \mathbb{F}_p^{24} \to \mathbb{F}_p^{24}$ be the Width-24 Poseidon2 permutation. In a STARK Merkle commitment phase, the prover evaluates $\pi$ on inputs $x_1, \ldots, x_P$ where $x_j = (n_{L,j} \| n_{R,j} \| h_H)$, with $n_{L,j}, n_{R,j} \in \mathbb{F}_p^8$ (child hashes) and $h_H \in \mathbb{F}_p^8$ (fixed header digest). $P = \sum_{i=0}^{m}(N_i - 1)$ is the total internal Merkle node count.
 
@@ -1167,7 +1170,7 @@ in \emph{Crypto 2022}.
 \url{https://eprint.iacr.org/2021/1379}
 
 \bibitem{komargodski2025}
-I.~Komargodski and O.~Weinstein,
+I.~Komargodski, I.~Schen, and O.~Weinstein,
 ``Proofs of Useful Work from Arbitrary Matrix Multiplication,''
 \emph{IACR Cryptology ePrint Archive}, 2025/685, 2025.
 \url{https://eprint.iacr.org/2025/685}
