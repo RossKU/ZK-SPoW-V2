@@ -198,7 +198,7 @@ $m$ & Number of FRI folding rounds \\
 $P$ & Total Poseidon2 permutations across all STARK phases: $P = \sum_{i=0}^{m}(N_i - 1)$ \\
 $\ell$ & Trace size exponent (trace has $2^\ell$ rows) \\
 $U$ & Per-permutation usefulness: ZK-contributing trials / total mining trials (\S\ref{sec:pouw-direction}) \\
-$U_{\mathrm{sys}}$ & System-level time-averaged usefulness: $f_{\mathrm{sym}} \times U$ \\
+$U_{\mathrm{sys}}$ & System-level time-averaged usefulness: $U_{\mathrm{sys}} = f_{\mathrm{sym}} \times U$ \\
 $d$ & S-box exponent ($x \mapsto x^d$; $d = 5$ for Poseidon2) \\
 $f_{\mathrm{sym}}$ & Fraction of Poseidon2 cycles executing STARK Merkle hashes \\
 $\mathcal{H}$ & Total PoW hashrate (network-wide) \\
@@ -805,6 +805,7 @@ The approach has clear limitations. Useful computation is not enforced at the co
 \emph{All parameters are reference estimates for a hypothetical 7~nm design. No chip has been fabricated.}
 
 \subsection{Die Allocation}
+\label{sec:die}
 
 \begin{table}[h]
 \centering
@@ -864,13 +865,13 @@ $^\dagger$Compute-saturated: $R_{\mathrm{merkle}}$ capped at $R_{\mathrm{perm}} 
 
 \textbf{SRAM pipelining constraint.} SRAM configurations (32--64~MB) may lack sufficient capacity to hold two proofs' data simultaneously (each proof requires ${\sim}4$--$8$~MB for trace $+$ extended evaluation). In this case, proof pipelining is limited, and the single-proof sequential model applies: $f_{\mathrm{sym}}$ depends on both $R_{\mathrm{merkle}}/R_{\mathrm{perm}}$ and phase sequencing. The values above assume pipelining is feasible; for SRAM-only designs, $f_{\mathrm{sym}}$ may be slightly lower (${\sim}8$--$17\%$). HBM configurations (8--16~GB) can hold hundreds of proofs and pipeline without constraint.
 
-\textbf{NoC area and power.} Delivering 200~GB/s of SRAM bandwidth to 21 Poseidon2 cores requires a Network-on-Chip (NoC) or crossbar interconnect. At 7~nm, a 200~GB/s mesh NoC consumes approximately 1--3\% of die area and 0.5--1.5~W. The 5\% Control \& I/O budget is tight: it must accommodate the NoC, PoW/STARK schedulers, difficulty comparison logic, and network interface. A more realistic breakdown may require 7--10\% for Control, I/O, and interconnect, reducing Poseidon2 core allocation from 50\% to ${\sim}47\%$ (20 cores instead of 21). This is a ${\sim}5\%$ hashrate reduction---non-negligible but does not qualitatively change the economic analysis (\S\ref{sec:econ}). The die allocation should be considered approximate; detailed physical design is beyond this paper's scope.
+\textbf{NoC area and power.} Delivering 200~GB/s of SRAM bandwidth to 21 Poseidon2 cores requires a Network-on-Chip (NoC) or crossbar interconnect. At 7~nm, a 200~GB/s mesh NoC (e.g., ring or 2D mesh topology) consumes approximately 1--3\% of die area and 0.5--1.5~W, depending on topology and wire length. The 5\% Control \& I/O budget (\S\ref{sec:die}) is tight: it must accommodate the NoC, PoW/STARK schedulers, difficulty comparison logic, and network interface. A more realistic breakdown may require 7--10\% for Control, I/O, and interconnect, reducing Poseidon2 core allocation from 50\% to ${\sim}47\%$ (20 cores instead of 21). This is a ${\sim}5\%$ hashrate reduction---non-negligible but does not qualitatively change the economic analysis (\S\ref{sec:econ}). The die allocation in \S\ref{sec:die} should be considered approximate; detailed physical design is beyond this paper's scope.
 
 % ============================================================
 \section{Trace Grinding and Triple-Ticket Proofs}
 \label{app:tracegrinding}
 
-The following provides complete formal proofs for the claims in \S\ref{sec:security}.
+The following provides complete formal proofs for the claims in \S\ref{sec:tracegrind}--\ref{sec:triple-ticket}.
 
 \subsection{Assumptions}
 
@@ -963,7 +964,7 @@ P(A < T \;\wedge\; B < T \;\wedge\; C < T) &= p_t^3 \\
 P(A < T \;\vee\; B < T \;\vee\; C < T) &= 1 - (1-p_t)^3 = 3p_t - 3p_t^2 + p_t^3
 \end{align*}
 
-The quantity $q = 1 - (1-p_t)^3$ used in \S\ref{sec:triple-ticket} and Appendix~\ref{app:tracegrinding} is exact under PRP, not an approximation. \qed
+The quantity $q = 1 - (1-p_t)^3$ used in \S\ref{sec:triple-ticket} and Appendix~B.2--B.5 is exact under PRP, not an approximation. \qed
 \end{proof}
 
 % ============================================================
@@ -990,7 +991,7 @@ We implement a complete Width-24 Poseidon2 Circle STARK prover in CUDA---iCFFT/C
 \small
 \begin{tabular}{@{}rrrrrr@{}}
 \toprule
-$k$ & Trace & STARK (ms) & Merkle perms & Proofs/s & PoW tickets/s \\
+$\ell$ & Trace & STARK (ms) & Merkle perms & Proofs/s & PoW tickets/s \\
 \midrule
 8 & 256 & 2.30 & 374 & 434.8 & 487.8K \\
 10 & 1{,}024 & 3.19 & 1.5K & 313.7 & 1.43M \\
@@ -1179,8 +1180,7 @@ arXiv:2505.21685, 2025.
 
 \bibitem{plonky3}
 Plonky3,
-``A Toolkit for Polynomial IOPs,''
-\texttt{poseidon2/src/round\_numbers.rs}, \texttt{mersenne-31/src/poseidon2.rs}.
+``A Toolkit for Polynomial IOPs.''
 \url{https://github.com/Plonky3/Plonky3} (accessed 2026-02-16).
 
 \bibitem{nockchain}
