@@ -534,61 +534,32 @@ where $\epsilon \approx 0.02$ accounts for proof setup, FRI round transitions, a
 \textbf{Width-24 efficiency.} Compression function mode halves the permutation count per Merkle hash ($2 \to 1$ vs sponge mode, \S\ref{sec:width}), but each Width-24 permutation is larger (30 rounds vs 22). Net cycle reduction is ${\sim}32\%$ (30 vs 44 rounds), not 50\%.
 
 % ============================================================
-\section{Pareto Analysis}
-\label{sec:pareto}
-
-\subsection{Competing Designs}
-
-Four designs compared under identical die area and power budget:
-
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{@{}llcccc@{}}
-\toprule
-Design & Die allocation & Hashrate & ZK & $U$ & Mine? \\
-\midrule
-Pure PoW & 95\% Pos2, 5\% ctrl & ${\sim}1.9\,\mathcal{H}$ & 0 & 0\% & Yes \\
-Pure Stwo & 20\% Pos2, 40\% NTT, 35\% SRAM & 0 & $Z_{\max}$ & 100\% & No \\
-\textbf{ZK-SPoW} & \textbf{50\% Pos2, 25\% NTT, 20\% SRAM} & $\mathcal{H}$ & $Z$ & $\mathbf{{\approx}67\%}$ & \textbf{Yes} \\
-ZK-SPoW+HBM & 50\% Pos2, 25\% NTT, 20\% HBM & $\mathcal{H}$ & $Z_{\mathrm{hbm}}$ & ${\approx}67\%$ & Yes \\
-\bottomrule
-\end{tabular}
-\caption{Pareto comparison of competing designs.}
-\label{tab:pareto}
-\end{table}
-
-Pure PoW achieves ${\sim}1.9\times$ hashrate on a die-area basis (95\%/50\% Poseidon2 allocation) but produces no ZK proofs ($U = 0\%$). On a hashes-per-watt basis, the gap narrows to ${\sim}1.1$--$1.2\times$ because idle NTT and SRAM contribute static leakage (${\sim}10$--$20\%$ of dynamic power; varies by process node). Pure Stwo uses standard Width-16 cores ($U = 100\%$) but cannot mine. ZK-SPoW achieves $U \approx 67\%$ and mining capability---the 33\% usefulness gap is the cost of PoW integration via width extension.
-
-\subsection{Economic Dominance}
-\label{sec:econ}
-
-Difficulty adjusts to total network hashrate. When all $N$ miners use the same design, per-ASIC mining revenue is $B/N$ regardless of absolute hashrate. The differentiator is ZK revenue:
-\[
-\text{ZK-SPoW revenue} = B/N + Z \cdot F \;>\; B/N = \text{Pure PoW revenue} \quad (\text{for any } ZF > 0)
-\]
-
-Pure PoW's ${\sim}1.1$--$1.2\times$ power-efficiency advantage yields at most ${\sim}10$--$20\%$ more mining revenue per watt in a mixed network. Once ZK fee income $Z \cdot F$ exceeds this margin, ZK-SPoW dominates. The crossover point depends on Kaspa's ZK market development, network growth trajectory, and adoption dynamics---detailed economic modeling is required for quantitative predictions.
-
-\textbf{PoW security without ZK demand.} ZK-SPoW does not condition PoW security on ZK demand. When $Z \cdot F = 0$ (no ZK market), the ASIC operates as a conventional PoW miner with a hash/watt disadvantage due to the die area overhead (\S\ref{sec:design-c}). Difficulty adjustment absorbs this: in a homogeneous ZK-SPoW network, per-ASIC mining revenue is identical to a homogeneous Pure PoW network. The die overhead is the cost of optionality---it purchases the ability to capture ZK revenue when the market emerges, without sacrificing PoW security in the interim.
-
-% ============================================================
-\section{Security Considerations}
+\section{Security Analysis}
 \label{sec:security}
 
 \subsection{Poseidon2 Cryptographic Properties}
 
-Poseidon2~\cite{poseidon2} provides 128-bit security in sponge mode with capacity $c = 8$ M31 elements (248 bits). In compression function mode (ZK-SPoW), security relies on collision resistance and preimage resistance of the permutation---well-established properties within the Poseidon2 framework~\cite{poseidon2}. Note that \cite{poseidon2} explicitly recommends compression function mode for Merkle trees (Section~4.2 of~\cite{poseidon2}), with security analysis independent of the sponge indifferentiability framework. Known algebraic attack vectors (Gr\"obner basis, interpolation, differential) have been analyzed for standard parameters. StarkWare has adopted Poseidon2 for production use in Starknet, representing significant implicit endorsement of its security.
+\textbf{Sponge mode vs compression function mode.} Poseidon2~\cite{poseidon2} provides 128-bit security in sponge mode via an indifferentiability argument: with capacity $c = 8$ M31 elements (248 bits), the sponge construction is indifferentiable from a random oracle up to $2^{124}$ queries. ZK-SPoW operates in compression function mode (\S\ref{sec:width}), where all 24 input elements are visible---there is no hidden capacity. Security in this mode relies on different, more direct properties of the permutation $\pi$:
 
-\textbf{Note:} All security claims in this paper assume final production round constants. The current Stwo implementation uses placeholder values (see \S\ref{sec:open}).
+\begin{itemize}
+\item \textbf{Collision resistance:} Finding $x \neq x'$ with $\pi(x)[0{:}7] = \pi(x')[0{:}7]$ requires $\Omega(2^{124})$ work (birthday bound on 248-bit output). This secures STARK Merkle binding.
+\item \textbf{Preimage resistance:} Finding $x$ with $\pi(x)[0{:}7] < T$ requires $\Omega(1/p_t)$ work. This secures PoW.
+\item \textbf{PRP (pseudorandom permutation):} Outputs are computationally indistinguishable from random, regardless of input structure. This secures progress-freedom (Theorem~1).
+\end{itemize}
 
-\subsection{Single Primitive Dependency}
+These are strictly weaker assumptions than sponge-mode indifferentiability---collision/preimage resistance of a permutation is implied by, but does not require, random oracle behavior. The Poseidon2 literature~\cite{poseidon,poseidon2} primarily analyzes the sponge construction, raising a natural question: does the round count $R_p = 22$ assume the existence of hidden capacity elements?
+
+\textbf{Round count is capacity-independent.} We verify from Plonky3's source~\cite{plonky3} that the round number calculation depends on exactly four parameters: field prime $p$, state width $t$, S-box degree $d$, and security level $M$. Capacity does not appear. The six security constraints (statistical, interpolation, three Gr\"obner basis variants, and the algebraic bound from~\cite{khovratovich2023}) target the \emph{permutation itself}---they bound the number of rounds needed to resist distinguishing attacks against $\pi$, not against a sponge construction built from $\pi$. Capacity $c$ is a separate, orthogonal parameter that determines sponge-mode security as $\min(\text{permutation security}, 2^{c/2})$. For compression function mode, only permutation security applies, and $R_p = 22$ (with margin $R_f \mathrel{{+}{=}} 2$, $R_p \times 1.075$) targets 128-bit permutation security directly.
+
+\textbf{Compression function mode risks.} While the round count is sound, operating without capacity has two consequences: (1)~the full 744-bit state is visible, giving an attacker more information for algebraic cryptanalysis (e.g., CICO attacks~\cite{skipping2026} become formulated over the full state rather than a reduced output space); (2)~there is no ``safety net''---in sponge mode, even a partial permutation break may be absorbed by the capacity, whereas in compression mode any permutation weakness directly impacts security. We believe this risk is manageable because: (a)~the 30-round configuration's algebraic properties (S-box degree growth, MDS diffusion) are mode-independent; (b)~the Poseidon2 paper~\cite{poseidon2} explicitly recommends compression function mode for Merkle trees; (c)~any attack on the sponge implies an attack on the compression function with equal or lower complexity, since the compression-mode attacker has strictly more information~\cite{poseidon2}. Conversely, compression-mode-specific attacks (exploiting visible capacity elements) do not necessarily transfer to sponge mode---making compression mode the more conservative security setting.
+
+\textbf{Single primitive dependency.}
 
 \begin{table}[h]
 \centering
 \begin{tabular}{@{}lll@{}}
 \toprule
-Component & Current Kaspa & Proposed \\
+Component & Traditional (e.g., Kaspa~\cite{kaspa}) & ZK-SPoW \\
 \midrule
 PoW & kHeavyHash (Blake2b + cSHAKE256) & Poseidon2 \\
 STARK & Poseidon2 & Poseidon2 \\
@@ -618,7 +589,7 @@ Independence & PoW $\neq$ STARK & PoW = STARK \\
 
 \textbf{PoW security.} Under the PRP assumption, finding an input whose output satisfies ticket ${<}\;T$ requires expected $1/p_t$ evaluations---no better strategy than random trials exists. No published algebraic attack on the 30-round permutation (8 external + 22 internal) is known to the authors for this parameter set.
 
-\textbf{$R_p$ for Width-24.} $R_p = 22$, targeting 128-bit security at $d = 5$ over M31, computed via Plonky3's round number formula~\cite{plonky3}. The formula applies six security constraints from~\cite{poseidon,poseidon2} (statistical, interpolation, three Gr\"obner basis variants) plus the algebraic attack bound from~\cite{khovratovich2023}, then adds margin: $R_f \mathrel{{+}{=}} 2$, $R_p \times 1.075$. Pre-margin optimum: $(R_f, R_p) = (6, 20)$; post-margin: $(8, 22)$. The binding constraints are statistical ($R_{f,1} = 6$, since $M = 128 \leq \lfloor \log_2 p - 2 \rfloor \times (t+1) = 700$) and Gr\"obner-2 ($R_{f,4} = 6$), tied. \textbf{Crucially, the formula depends only on $(p, t, d, M)$---capacity is not a parameter} (see \S\ref{sec:security}). Total rounds: 30 ($8 + 22$). S-box operations: $t \times R_f + R_p = 24 \times 8 + 22 = 214$ per permutation; in compression function mode, this yields 25\% fewer S-boxes per Merkle hash than Width-16 sponge ($214$ vs $2 \times 142 = 284$). Supplementary: $M_I^k$ is invertible for $k = 1..48$ (subspace trail resistance). Algebraic degree after 30 rounds exceeds $2^{69}$ ($5^{30} \approx 2^{69.7}$), far above the interpolation threshold of $2^{\min(M,\, n)} = 2^{31}$ for M31; the interpolation constraint is non-binding.
+\textbf{$R_p$ for Width-24.} $R_p = 22$, targeting 128-bit security at $d = 5$ over M31, computed via Plonky3's round number formula~\cite{plonky3}. The formula applies six security constraints from~\cite{poseidon,poseidon2} (statistical, interpolation, three Gr\"obner basis variants) plus the algebraic attack bound from~\cite{khovratovich2023}, then adds margin: $R_f \mathrel{{+}{=}} 2$, $R_p \times 1.075$. Pre-margin optimum: $(R_f, R_p) = (6, 20)$; post-margin: $(8, 22)$. The binding constraints are statistical ($R_{f,1} = 6$, since $M = 128 \leq \lfloor \log_2 p - 2 \rfloor \times (t+1) = 700$) and Gr\"obner-2 ($R_{f,4} = 6$), tied. \textbf{Crucially, the formula depends only on $(p, t, d, M)$---capacity is not a parameter} (\S\ref{sec:security}). Total rounds: 30 ($8 + 22$). S-box operations: $t \times R_f + R_p = 24 \times 8 + 22 = 214$ per permutation; in compression function mode (\S\ref{sec:width}), this yields 25\% fewer S-boxes per Merkle hash than Width-16 sponge ($214$ vs $2 \times 142 = 284$). Supplementary: $M_I^k$ is invertible for $k = 1..48$ (subspace trail resistance). Algebraic degree after 30 rounds exceeds $2^{69}$ ($5^{30} \approx 2^{69.7}$), far above the interpolation threshold of $2^{\min(M,\, n)} = 2^{31}$ for M31; the interpolation constraint is non-binding.
 
 \textbf{CICO complexity in compression mode.} A Constrained-Input Constrained-Output (CICO) attacker on the compression function seeks $x \in \mathbb{F}_p^{24}$ satisfying partial output constraints on $\pi(x)$. Modeling via intermediate S-box variables~\cite{poseidon}: the 30-round permutation yields a polynomial system of $n \approx 238$ variables and 238 equations of degree ${\leq}\,5$ ($24$ input unknowns $+ 8 \times 24$ full-round $+ 22$ partial-round S-box intermediates). Gr\"obner basis complexity is $\binom{n + d_{\mathrm{reg}}}{d_{\mathrm{reg}}}^{\omega}$, where $d_{\mathrm{reg}}$ is the degree of regularity. Experimental estimates on Poseidon instances yield $d_{\mathrm{reg}} \approx R_f/2 + R_p + 2 = 28$ for 30 rounds. With $n = 238$ and $\omega = 2$ (conservative):
 
@@ -642,27 +613,60 @@ Reaching the security threshold ($d_{\mathrm{reg}} \leq 11$) requires reducing t
 
 \textbf{Recent cryptanalysis.} See~\S\ref{sec:security} (Current margin) for detailed analysis of~\cite{skipping2026} and~\cite{resultant2026}.
 
-\subsection{PoW Hash Distribution}
-\label{sec:pow-dist}
+\subsection{Trace Grinding Resistance}
 
-All three output regions---$\mathit{pow\_ticket}_0 = S[0..7]$, $\mathit{pow\_ticket}_1 = S[8..15]$, and $\mathit{pow\_ticket}_2 = S[16..23]$---are outputs of the same Poseidon2 permutation. In compression function mode, all 24 state elements are visible by design. Security relies on the permutation's PRP properties: given a random-looking input, all output elements should be indistinguishable from random. The three PoW tickets are deterministically linked (same permutation), but each is individually pseudorandom. An attacker who could predict one ticket from another without computing the full permutation would violate the PRP assumption---equivalent to breaking Poseidon2. The full-round permutation (8 external + 22 internal) ensures all output elements are cryptographically mixed across all 24 state positions.
+Trace selection in Symbiotic mode provides zero advantage for PoW mining under the PRP assumption. We summarize the results here; full proofs are in Appendix~\ref{app:tracegrinding}.
 
-\textbf{Triple-ticket mining:} Under the PRP assumption on Poseidon2, the three tickets are computationally indistinguishable from mutually independent uniform blocks (Appendix~\ref{app:triple-ticket}). With three 248-bit tickets per permutation, the per-permutation success probability under the ideal-PRP model is:
-\[
-P(\text{valid}) = 1 - (1 - p)^3 = 3p - 3p^2 + p^3, \quad p = T/2^{248}\footnote{Each M31 element ranges over $[0, 2^{31}-2]$, so the exact denominator is $(2^{31}-1)^8$ rather than $2^{248}$. The ratio $(2^{31}-1)^8/2^{248} = (1-2^{-31})^8 \approx 1 - 3.7 \times 10^{-9}$. We use $2^{248}$ throughout as a convenient approximation.}
-\]
+Under PRP, three invariants hold:
 
-Note that the number of tickets per permutation does not affect mining economics in a homogeneous network: difficulty adjustment absorbs any change in per-permutation success probability, leaving per-miner revenue at $B/N$ (\S\ref{sec:econ}). The triple-ticket structure is a natural consequence of Width-24's symmetric $8{+}8{+}8$ output and Stwo's 8-element hash convention, not a hashrate optimization.
+\begin{enumerate}
+\item \textbf{Ticket count invariance.} Total permutations $P = \sum_{i=0}^{m}(N_i - 1)$ is protocol-determined and trace-independent. The miner cannot increase ticket count by selecting a different trace (Appendix~\ref{app:tracegrinding}).
+
+\item \textbf{Distribution invariance.} The number of valid tickets follows $V \sim \mathrm{Binomial}(P, q)$, where both $P$ and $q = 1 - (1-p_t)^3$ are trace-independent. The \emph{entire distribution} is invariant under trace selection (Appendix~\ref{app:tracegrinding}).
+
+\item \textbf{Grinding is dominated.} Header digest grinding is equivalent to nonce grinding at equal cost (Appendix~\ref{app:tracegrinding}). Multi-trial grinding ($K$ traces, best-of-$K$) is strictly dominated by $K \times P$ pure PoW permutations (Appendix~\ref{app:tracegrinding}). Merkle tree feedback does not violate PRP (Appendix~\ref{app:tracegrinding}).
+\end{enumerate}
+
+\subsection{Triple-Ticket Independence}
+\label{sec:triple-ticket}
+
+The three PoW tickets from a single permutation are deterministically linked but computationally independent under PRP.
+
+\begin{proposition}
+Under the PRP assumption, the joint distribution of $\mathrm{ticket}_0 = S[0..7]$, $\mathrm{ticket}_1 = S[8..15]$, and $\mathrm{ticket}_2 = S[16..23]$ is computationally indistinguishable from three mutually independent uniform samples over $\mathbb{F}_p^8$, each with success probability $p_t = T/p^8$. The per-permutation success probability is $q = 1 - (1-p_t)^3$.
+\end{proposition}
+
+No early-termination optimization exists: evaluating any ticket requires the full permutation, which produces all three simultaneously. Any statistical test detecting inter-ticket correlation can be converted into a PRP distinguisher with equal advantage. Full proof in Appendix~\ref{app:triple-ticket}.
 
 \subsection{Quantum Resistance}
 
-Poseidon2's security against quantum adversaries:
 \begin{itemize}
-\item Grover's algorithm halves the effective hash bits: $248/2 = 124$-bit quantum security
+\item Grover's algorithm halves effective hash bits: $248/2 = 124$-bit quantum security
 \item Comparable to SHA-256 under quantum attack ($256/2 = 128$ bits)
 \item kHeavyHash: $256/2 = 128$-bit quantum security
-\item \textbf{Delta:} $-8$ bits classical (248 vs 256) / $-4$ bits quantum (124 vs 128) from the transition. Both values remain well above the 100-bit security floor considered acceptable for PoW functions.
+\item \textbf{Delta:} $-8$ bits classical (248 vs 256) / $-4$ bits quantum (124 vs 128). Both exceed the current NIST minimum of 112 bits (SP~800-131A Rev.~2) and BSI's 120-bit floor (TR-02102-1). The 4-bit shortfall relative to SHA-256 and the proposed NIST 128-bit floor (SP~800-131A Rev.~3 draft, 2030) is a known tradeoff of using the 248-bit M31 Poseidon2 output; if needed, full-state comparison (744-bit) provides ample margin.
 \end{itemize}
+
+% ============================================================
+\section{Economic Considerations}
+\label{sec:econ}
+
+A ZK-SPoW ASIC includes NTT units and memory infrastructure absent from a Pure PoW design. This die area overhead reduces hash/watt by a factor $\alpha > 1$ (the exact value depends on implementation; see Appendix~\ref{app:asic} for one illustrative design). The economic question is whether ZK revenue compensates for this gap.
+
+\textbf{Revenue comparison.} Per-watt revenue:
+$$\text{ZK-SPoW} = \frac{\mathcal{H}_{\mathrm{spow}}}{\mathcal{H}_{\mathrm{total}}} \cdot B + Z \cdot F \quad \text{vs} \quad \text{Pure PoW} = \frac{\mathcal{H}_{\mathrm{pow}}}{\mathcal{H}_{\mathrm{total}}} \cdot B$$
+
+ZK-SPoW dominates when $Z \cdot F$ exceeds the mining revenue gap from the $\alpha$ disadvantage.
+
+\textbf{Equilibrium condition.} Let $\alpha$ be the Pure PoW hash/watt advantage. ZK-SPoW ASICs survive in equilibrium when:
+$$Z \cdot F \geq (\alpha - 1) \cdot \frac{\mathcal{H}_{\mathrm{spow}}}{\mathcal{H}_{\mathrm{total}}} \cdot B$$
+
+Let $D$ be the network-wide ZK proof demand (proofs/s) and $N_{\mathrm{spow}}$ the number of ZK-SPoW miners. In steady state, per-miner ZK revenue is $F \cdot D / N_{\mathrm{spow}}$. The minimum viable demand is:
+$$D_{\min} = \frac{N_{\mathrm{spow}} \cdot (\alpha - 1) \cdot B}{N \cdot F}$$
+
+\textbf{PoW security is unconditional.} Regardless of ZK demand, ZK-SPoW ASICs function as conventional PoW miners with a hash/watt disadvantage. Difficulty adjustment absorbs this. \textbf{Network security is not structurally compromised by insufficient ZK demand}; only the economic advantage of ZK-SPoW hardware is affected.
+
+\textbf{Demand scarcity risk.} If $D < D_{\min}$, Pure PoW ASICs dominate economically. If $D \ll N_{\mathrm{spow}} \cdot Z$, most ZK-SPoW cycles execute in Pure PoW mode ($U_{\mathrm{sys}} \approx 0\%$), and rational miners may prefer cheaper Pure PoW hardware---an economic (not security) collapse scenario. Whether sustained ZK proof demand at the required scale will materialize is an open question (\S\ref{sec:open}).
 
 % ============================================================
 \section{Comparison with Prior Work}
@@ -1205,7 +1209,7 @@ P(A < T \;\wedge\; B < T \;\wedge\; C < T) &= p^3 \\
 P(A < T \;\vee\; B < T \;\vee\; C < T) &= 1 - (1-p)^3 = 3p - 3p^2 + p^3
 \end{align*}
 
-The quantity $q = 1 - (1-p)^3$ used in \S\ref{sec:pow-dist} and Appendix~\ref{app:tracegrinding} is exact under PRP, not an approximation.
+The quantity $q = 1 - (1-p)^3$ used in \S\ref{sec:triple-ticket} and Appendix~\ref{app:tracegrinding} is exact under PRP, not an approximation.
 \end{proof}
 
 \textbf{Implication for mining.} A miner who observes any one ticket gains no information about whether the other two are below target. The only way to evaluate all tickets is to compute the full Poseidon2 permutation---which already produces all three simultaneously. There is no early-termination optimization. In Symbiotic mode, $\mathit{pow\_ticket}_0 = \mathit{merkle\_parent}$: reading it for PoW comparison does not modify the value used by the STARK Merkle tree.
