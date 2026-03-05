@@ -248,14 +248,14 @@ Commitment hash & Blake2s (base layer), Poseidon over Felt252 (recursive proofs)
 \subsection{PoW Function Replacement}
 \label{sec:pow-replacement}
 
-\textbf{Current (kHeavyHash):}
+\textbf{Current (kHeavyHash~\cite{kaspa}):}
 \begin{Verbatim}[fontsize=\small]
-pre_pow_hash = Blake2b(H excluding nonce and timestamp)
-inner        = cSHAKE256_PoW(pre_pow_hash || timestamp || nonce)
+pre_pow_hash = Blake2b(H with nonce=0, timestamp=0)
+inner        = cSHAKE256_PoW(pre_pow_hash || timestamp || [0u8;32] || nonce)
 pow_hash     = cSHAKE256_Heavy(M * inner XOR inner)
 valid iff pow_hash < target
 \end{Verbatim}
-where $M$ is a $64\times64$ full-rank matrix over 4-bit nibbles (generated from \texttt{pre\_pow\_hash} via XoShiRo256++), nonce is 8~bytes (\texttt{u64}). The inner hash splits into 64~nibbles for matrix-vector multiplication; \texttt{cSHAKE256\_PoW} and \texttt{cSHAKE256\_Heavy} use domain strings \texttt{"ProofOfWorkHash"} and \texttt{"HeavyHash"} respectively~\cite{kaspa}.
+where $M$ is a $64\times64$ full-rank matrix over 4-bit nibbles (generated from \texttt{pre\_pow\_hash} via XoShiRo256++), nonce is 8~bytes (\texttt{u64}).
 
 \textbf{Proposed (Poseidon2-PoW):}
 \begin{Verbatim}[fontsize=\small]
@@ -266,63 +266,46 @@ pow_hash1 = (S[8], S[9], ..., S[15])           // 8 M31 elements = 248 bits
 pow_hash2 = (S[16], S[17], ..., S[23])         // 8 M31 elements = 248 bits
 valid iff pow_hash0 < target OR pow_hash1 < target OR pow_hash2 < target
 \end{Verbatim}
-where $(v_1, v_2)$ are 8 M31 elements each (64 bytes total nonce). The permutation operates in \textbf{compression function mode}---all 24 input elements are visible (no hidden capacity). This differs from Stwo's standard sponge mode (width 16, rate 8, capacity 8) but is a recommended Poseidon2 usage mode~\cite{poseidon2}. Each permutation produces \textbf{three PoW tickets}---one from each 8-element output region. The comparison $\mathit{pow\_hash} < \mathit{target}$ interprets both as 248-bit unsigned integers via big-endian concatenation of 8 M31 elements, each zero-padded to 31 bits. In Symbiotic mode, $\mathit{pow\_hash}_0 = \mathit{merkle\_parent}$: the same output advances the ZK proof and serves as a PoW ticket (reading the value does not modify it).
+where $(v_1, v_2)$ are 8 M31 elements each (64 bytes total nonce). The permutation operates in \textbf{compression function mode}---all 24 input elements are visible (no hidden capacity). Each permutation produces \textbf{three PoW tickets}. The comparison interprets both hash and target as 248-bit unsigned integers via big-endian concatenation of 8 M31 elements, each zero-padded to 31 bits. In Symbiotic mode, $\mathit{pow\_hash}_0$ equals the Merkle parent: the same output advances the ZK proof and serves as a PoW ticket.
 
 \textbf{Verification cost:} One Poseidon2 permutation (width 24) + three target comparisons + one header pre-hash (amortized).
 
-\textbf{Standard PoW structure.} ZK-SPoW is conventional hash-based PoW: miners explore a nonce space by computing Poseidon2 permutations and comparing outputs against a difficulty target, identically to Nakamoto-style PoW. The ZK component (Symbiotic mode, \S\ref{sec:symbiotic}) is an optional revenue source sharing the same hardware---it does not modify the PoW function, security model, or difficulty adjustment. When no ZK demand exists, the ASIC reverts to conventional PoW mining (\S\ref{sec:pure-pow}) with identical security guarantees.
+\textbf{Standard PoW structure.} ZK-SPoW is conventional hash-based PoW: miners explore a nonce space by computing Poseidon2 permutations and comparing outputs against a difficulty target, identically to Nakamoto-style PoW. The ZK component (Symbiotic mode, \S\ref{sec:symbiotic}) is an optional revenue source sharing the same hardware---it does not modify the PoW function, security model, or difficulty adjustment.
 
 \subsection{Poseidon2 Width Extension}
 \label{sec:width}
 
 The core design change is extending the Poseidon2 permutation width to accommodate header digest as an additional input, and switching from sponge mode to compression function mode.
 
-\subsubsection{Stwo Baseline}
-
-Stwo's Poseidon2 operates in \textbf{sponge mode} with width 16:
+\textbf{Stwo Baseline.} Stwo's Poseidon2 operates in sponge mode with width 16:
 \begin{Verbatim}[fontsize=\small]
 Width t0 = 16
 Rate  r  = 8    <- absorbs 8 elements per permutation
 Capacity c = 8  <- hidden elements (security)
 \end{Verbatim}
+For Merkle tree commitments, each node hash requires two sponge absorptions (2~permutations per Merkle hash).
 
-For Merkle tree commitments, each node hash requires \textbf{two sponge absorptions}:
-\begin{Verbatim}[fontsize=\small]
-Absorb left_child[8]  -> Permute -> (state updated)
-Absorb right_child[8] -> Permute -> Squeeze output[8]
-Total: 2 permutations per Merkle hash
-\end{Verbatim}
-
-\subsubsection{Design Alternatives}
-\label{sec:design-alt}
-
-Three approaches to integrate header digest into the Merkle hash:
+\textbf{Design Alternatives.} Three approaches to integrate header digest into the Merkle hash:
 
 \begin{table}[h]
 \centering
 \small
-\begin{tabular}{@{}lllcccc@{}}
+\begin{tabular}{@{}lllcc@{}}
 \toprule
-Design & Width & Mode & Perm/Merkle & Perm/PoW & Core $\Delta$ & Die $\Delta$ \\
+Design & Width & Mode & Perm/Merkle & Perm/PoW \\
 \midrule
-A: Header re-hash & 16 & Sponge & 2 & 4 & 0\% & 0\% \\
-B: Width 20 & 20 & Compression & 1 & 1 & +22\% & ${\sim}$+11\% \\
-\textbf{C: Width 24} & \textbf{24} & \textbf{Compression} & \textbf{1} & \textbf{1} & \textbf{+44--105\%} & $\mathbf{{\sim}\text{+22--50\%}}$ \\
+A: Header re-hash & 16 & Sponge & 2 & 4 \\
+B: Width 20 & 20 & Compression & 1 & 1 \\
+\textbf{C: Width 24} & \textbf{24} & \textbf{Compression} & \textbf{1} & \textbf{1} \\
 \bottomrule
 \end{tabular}
 \caption{Design alternatives for header digest integration.}
 \label{tab:designs}
 \end{table}
 
-\textbf{Design~A:} No Poseidon2 modification. Standard width-16 sponge Merkle hash (2~permutations: absorb $\mathit{left\_child}$, absorb $\mathit{right\_child}$). To bind the header for PoW, a \emph{second} sponge hash is required: $\mathrm{sponge}(\mathit{merkle\_parent},\; \mathit{header\_digest}) \to \mathit{pow\_hash}$ (2~additional permutations). Total: \textbf{4~permutations per PoW draw}, vs 1 for compression function mode. The STARK tree itself is unmodified (2~perm/node), but each PoW draw doubles the permutation cost.
+\textbf{Design~A} requires no Stwo modification but costs 4~permutations per PoW draw (2~Merkle $+$ 2~header binding). \textbf{Design~B} provides only 4~M31 elements (124 bits) for header digest---birthday bound $2^{62}$, insufficient for 128-bit security. \textbf{Design~C (selected)} achieves symmetric $8{+}8{+}8$ I/O with 1~permutation per Merkle hash and per PoW draw, 248-bit header digest (birthday bound $2^{124}$), and three PoW tickets per permutation. Width~24 is within the Poseidon2 paper's analyzed parameter range~\cite{poseidon2}.
 
-\textbf{Design~B:} Extend to width~20 with $\mathit{header\_digest}[4]$. Compression function mode, 1~permutation per Merkle hash and per PoW draw. However, header digest is only 4~M31 elements (124 bits), giving a birthday collision bound of $2^{62}$---well below the 128-bit security target. Asymmetric $8{+}8{+}4$ I/O with 4~wasted output elements.
-
-\textbf{Design~C (selected):} Extend to width~24 with $\mathit{header\_digest}[8]$. Symmetric $8{+}8{+}8$ I/O---header digest is baked into every Merkle hash, so each permutation simultaneously advances the STARK tree and produces a PoW-checkable output. \textbf{1~permutation per Merkle hash and per PoW draw}, with zero additional overhead. $S[0..7]$ serves as both $\mathit{merkle\_parent}$ (STARK) and PoW output. Header digest: 248 bits (birthday bound $2^{124}$). Width~24 is within the Poseidon2 paper's analyzed parameter range~\cite{poseidon2}. \textbf{ZK throughput is unaffected}: STARK Merkle hashing is SRAM-bandwidth-bound regardless of core width (see \S\ref{sec:bottleneck}). The width extension cost manifests as $U = 16/24 \approx 67\%$ (\S\ref{sec:pouw-paradox}). \textbf{Requires Stwo-Kaspa verifier} supporting Width-24 compression function mode.
-
-\textbf{Design~A vs~C tradeoff.} Design~A requires no Stwo modification and uses well-analyzed Width-16 parameters. However, each PoW draw costs 4~permutations (2~Merkle $+$ 2~header binding), while Design~C completes both Merkle hash and PoW draw in a single permutation. Accounting for Design~A's smaller cores (more cores per die), Design~C still yields ${\sim}2\times$ higher aggregate PoW throughput per die. Design~C also simplifies scheduling (each permutation is stateless, vs sponge state tracking). The cost: Design~C requires a Width-24 Stwo-Kaspa verifier (\S\ref{sec:open}) and $+44$--$105\%$ core area overhead.
-
-\subsubsection{Proposed Extension (Design~C)}
+\textbf{Proposed Extension (Design~C):}
 \label{sec:design-c}
 
 \begin{Verbatim}[fontsize=\small]
@@ -353,13 +336,9 @@ State registers & $16 \times 31 = 496$ bits & $24 \times 31 = 744$ bits & +50\% 
 \label{tab:internals}
 \end{table}
 
-Internal round MDS scales as $O(t)$, not $O(t^2)$, because the sparse MDS structure (diagonal $+$ rank-1) requires only $t$~multiplications per round. This makes the width extension significantly cheaper than for standard Poseidon.
+Width-24 requires $R_p = 22$ internal rounds vs Width-16's $R_p = 14$ (\S\ref{sec:width24sec}), adding $+36\%$ pipeline depth. Per-permutation data overhead: $8/24 \approx 33\%$ of state carries header digest rather than ZK data. ASIC area implications are analyzed in Appendix~\ref{app:asic}.
 
-\textbf{Core area overhead: $+44\%$ (datapath width) to ${\sim}+105\%$ (fully pipelined).} The datapath widens by 50\% ($24/16$), and Width-24 requires $R_p = 22$ internal rounds vs Width-16's $R_p = 14$ (\S\ref{sec:width24sec}), adding $+36\%$ pipeline depth (30 vs 22 total rounds). In an iterative (round-reuse) design, core area increases by ${\sim}+50\%$ (width only) with 36\% more cycles per hash. In a fully pipelined design, core area approximately doubles. Total die area impact: ${\sim}+22\%$ to ${\sim}+50\%$ depending on implementation (Poseidon2 is 50\% of die; see Appendix~\ref{app:asic}). The usefulness cost is $U = t_0/t = 16/24 \approx 67\%$---the 33\% overhead per permutation serves PoW integration, not ZK computation.
-
-\subsubsection{Compression Function vs Sponge}
-
-Standard Stwo uses sponge mode with 8 hidden capacity elements. This proposal uses \textbf{compression function mode} where all 24 state elements are visible.
+\textbf{Compression Function vs Sponge.}
 
 \begin{table}[h]
 \centering
@@ -378,7 +357,7 @@ PoW tickets per hash & 0 & \textbf{3} \\
 \label{tab:sponge-vs-comp}
 \end{table}
 
-Both modes are established Poseidon2 usage modes~\cite{poseidon2}. The Poseidon2 paper recommends compression function mode for Merkle trees, noting up to $5\times$ efficiency over sponge mode in compute-bound settings. On ASIC implementations, STARK Merkle throughput is typically SRAM-bandwidth-bound (see \S\ref{sec:sram}), so the per-permutation efficiency gain manifests as more Poseidon2 cycles available for PoW rather than faster ZK proof generation. Width~24 is within the paper's analyzed parameter range~\cite{poseidon2,plonky3}.
+Both modes are established Poseidon2 usage modes~\cite{poseidon2}. The Poseidon2 paper recommends compression function mode for Merkle trees.
 
 \subsection{I/O Mapping}
 \label{sec:io}
@@ -400,12 +379,6 @@ OUTPUT (24 = 8+8+8, all visible):
   S[16..23]  -> pow_ticket2     PoW ticket 2 (248 bits)
 \end{Verbatim}
 
-Symmetric $8{+}8{+}8$ I/O with no unused output elements. No capacity elements---compression function mode exposes all state elements. Security relies on the Poseidon2 permutation's collision resistance and PRP properties (\S\ref{sec:width24sec}). $S[0..7]$ serves dual roles: it advances the STARK Merkle tree (as $\mathit{merkle\_parent}$) and is checked against the PoW target. Reading $S[0..7]$ for PoW comparison does not modify the value used by the STARK computation.
-
-\textbf{Note on full diffusion:} The Poseidon2 permutation mixes all 24 state elements through its MDS matrix every round. All output elements are functions of all input elements---there is no structural separation between output regions. The $8{+}8{+}8$ labeling is a convention for reading the output, not a property of the permutation. This means $\mathit{merkle\_parent}$ depends on $\mathit{header\_digest}$, and the Stwo-Kaspa verifier must account for this.
-
-\textbf{Dual-use property:}
-
 \begin{table}[h]
 \centering
 \small
@@ -421,9 +394,9 @@ Pure PoW & $v_1$ & $v_2$ & $h_H$ & PoW ticket$_0$ & PoW ticket$_1$ & PoW ticket$
 \label{tab:dual-use}
 \end{table}
 
-The same Poseidon2 hardware computes both modes. Only the input source for $S[0..15]$ differs (SRAM Merkle data vs random nonces). $S[16..23]$ is always $h_H$. \textbf{Each permutation produces 3~PoW tickets}---one from each 8-element output region.
+The same Poseidon2 hardware computes both modes. Only the input source for $S[0..15]$ differs. \textbf{Note on full diffusion:} The Poseidon2 permutation mixes all 24 state elements through its MDS matrix every round. All output elements are functions of all input elements---the $8{+}8{+}8$ labeling is a convention for reading the output, not a property of the permutation.
 
-\textbf{Note on ticket granularity.} The $3 \times 8$-element partition is a protocol convention, not a cryptographic constraint. Under PRP, any contiguous or non-overlapping subset of the 24 output elements is pseudorandom. The default 8-element reading (248 bits) provides sufficient difficulty-target precision at current network scale and matches Stwo's hash output convention. If future hashrate growth demands finer target granularity, the comparison window can be widened---up to the full 24-element output (744 bits)---without modifying the hash function; only the target comparison logic changes.
+\textbf{Note on ticket granularity: 3 tickets vs 1 ticket.} The $3 \times 8$-element partition is a protocol convention, not a cryptographic necessity. An alternative design reads all 24 output elements as a single value in $\mathbb{F}_p^{24}$ and adjusts the difficulty target accordingly ($q_{\mathrm{single}} = T_{24}/p^{24}$ vs $q_{\mathrm{triple}} = 1-(1-T_8/p^8)^3 \approx 3 T_8/p^8$). Both achieve equivalent expected block times via difficulty adjustment. We choose $3 \times 248$-bit tickets because: (1)~\textbf{Stwo compatibility:} 8-element output matches the Stwo hash convention, enabling direct reuse of Merkle commitment infrastructure; (2)~\textbf{Symbiotic mode constraint:} in Symbiotic mode, $S[0..7]$ \emph{must} be the Merkle parent (used by the STARK), so it has a designated role---the 3-ticket design naturally partitions the output into ``STARK-functional'' and ``PoW-only'' regions. A single-ticket design with 744-bit comparison achieves equivalent expected block times via difficulty adjustment; Proposition~3 (\S\ref{sec:triple-ticket}) confirms that the three tickets are computationally independent under PRP, validating the $q = 1-(1-p_t)^3$ formula.
 
 \subsection{Block Structure}
 \label{sec:block}
@@ -447,50 +420,23 @@ Header {
 }
 \end{Verbatim}
 
-The only structural change is the nonce expansion from \texttt{u64} (8 bytes) to \texttt{[F\_p; 16]} (64 bytes, +56~bytes per block, ${\sim}0.04\%$ of 125~KB). The nonce maps to Poseidon2 input positions $S[0..15]$ as $(v_1, v_2)$, each 8~M31 elements.
+The only structural change is the nonce expansion from \texttt{u64} (8 bytes) to \texttt{[F\_p; 16]} (64 bytes, +56~bytes per block). At 100~BPS this adds 5.6~KB/s to network bandwidth---negligible relative to the ${\sim}12.5$~MB/s block-body baseline (125~KB max body per KIP-13 $\times$ 100~BPS; total network traffic is higher due to headers and DAG parent references). The +56~bytes per header add $<$1~$\mu$s to block propagation delay at 1~Gbps, with negligible expected impact on orphan rates.
 
-\begin{table}[h]
-\centering
-\begin{tabular}{@{}lll@{}}
-\toprule
- & kHeavyHash (current) & Poseidon2-PoW (proposed) \\
-\midrule
-Nonce & \texttt{u64} (8 bytes) & \texttt{[F\_p; 16]} (64 bytes) \\
-PoW function & kHeavyHash $\to$ 256-bit & Poseidon2 Width-24 $\to$ 248-bit \\
-Block hash & Blake2b-256 $\to$ 256-bit & Blake2b-256 $\to$ 256-bit (\textbf{unchanged}) \\
-\bottomrule
-\end{tabular}
-\caption{Block structure comparison.}
-\label{tab:block}
-\end{table}
-
-\textbf{Block hash vs PoW hash.} Kaspa computes block identity and PoW with separate hash functions. The block hash (Blake2b-256 over the full serialized header including nonce) provides DAG references and block identification---unchanged by this proposal. Only the PoW function is replaced: $h_H = \mathrm{PoseidonSponge}(\text{header excluding nonce})$ is the amortized pre-hash, combined with the nonce in Width-24 Poseidon2 (\S\ref{sec:pow-replacement}). The 248-bit PoW output does not affect the 256-bit block hash.
+\textbf{Block hash vs PoW hash.} Block identity and PoW use separate hash functions. The block hash (e.g., Blake2b-256 for DAG references) is unchanged; only the PoW function is replaced.
 
 \textbf{STARK proofs are NOT included in the block.} They are submitted as independent transactions in the mempool, providing economic value to the ZK ecosystem (vProgs fees). This eliminates the +3--5~MB/s bandwidth overhead that would result from mandatory per-block STARK proofs at 100~BPS.
 
-\textbf{Proof verification with header binding.} Because Merkle commitments use $\mathit{header\_digest}$ as a salt (\S\ref{sec:io}), each STARK proof is bound to a specific block header. The proof transcript includes $\mathit{header\_digest}$ as a public input; the verifier uses it when checking Merkle decommitment paths (each node: $\text{Poseidon2}(\mathit{left\_child} \| \mathit{right\_child} \| \mathit{header\_digest}) = \mathit{parent}$). Since $\mathit{header\_digest} = \text{PoseidonSponge}(\text{block header})$ is deterministically derivable from public block data, any third party can verify the proof without additional trust assumptions. This is a standard public-input mechanism: the proof attests ``this computation is correct for public input $\mathit{header\_digest} = X$.''
+\textbf{Mode distinguishability (optional, not consensus-critical).} Although blocks do not contain STARK proofs, the operating mode (Symbiotic vs Pure PoW) is distinguishable through two independent mechanisms if the protocol chooses to use them. Neither is required for consensus validity---PoW security holds regardless of mode:
 
-\subsection{Header Digest Collision Resistance}
+\begin{enumerate}
+\item \textbf{Nonce format convention.} The protocol can define that Pure PoW nonces must zero-pad a designated region (e.g., \texttt{v2[4..7] = 0}). In Symbiotic mode, the corresponding nonce positions contain Merkle child data---Poseidon2 outputs that are zero with probability $1/p^4 \approx 2^{-124}$. A verifier inspects the nonce field in the block header: zeros in the designated region indicate Pure PoW; non-zeros indicate a Symbiotic claim. The cost is a reduction in Pure PoW nonce space from 16 to 12 elements (372 bits)---no practical impact on hashrate.
 
-The header digest $h_H$ compresses the block header (excluding nonce) into $k$ field elements. If $k$ is too small, an attacker can find two headers $H_A \neq H_B$ with identical $h_H$, allowing PoW solutions to be transplanted between conflicting blocks.
+\item \textbf{Mempool proof correlation.} Each STARK proof submitted to the mempool commits to Merkle trees constructed with a specific header digest $h_H$ as a salt in every node (\S\ref{sec:width}). The verifier of the STARK proof requires $h_H$ to recompute Merkle opening paths. By matching a proof's $h_H$ against a block header, any node can verify \emph{after the fact} that a given block was mined during Symbiotic computation for that specific header. This requires no protocol changes---the binding evidence is inherent in the STARK proof structure.
+\end{enumerate}
 
-\begin{table}[h]
-\centering
-\begin{tabular}{@{}cccc@{}}
-\toprule
-$k$ (elements) & Bits & Birthday bound & Security \\
-\midrule
-1 & 31 & $2^{15} \approx 32$K & INSECURE \\
-2 & 62 & $2^{31} \approx 2 \times 10^9$ & INSECURE \\
-4 & 124 & $2^{62} \approx 4.6 \times 10^{18}$ & SECURE \\
-8 & 248 & $2^{124}$ & Conservative but justified \\
-\bottomrule
-\end{tabular}
-\caption{Header digest collision resistance by element count.}
-\label{tab:collision}
-\end{table}
+Neither mechanism is mandatory for consensus. The current design treats mode distinguishability as optional: the PoW function is valid regardless of mode, and ZK revenue provides the economic incentive for Symbiotic mining. However, if future protocol evolution requires rewarding or mandating useful work, these mechanisms provide a path to verifiable mode identification without modifying the PoW function itself.
 
-\textbf{Minimum: $k = 4$} (124-bit collision resistance). We choose $\mathbf{k = 8}$ (248-bit, matching PoW hash size) to enable symmetric $8{+}8{+}8$ I/O and 3~PoW tickets per permutation. The triple-ticket structure and high permutation rate (${\sim}10^9$/sec per ASIC) make the conservative choice appropriate. Width extension: $t = 16 + 8 = 24$.
+\textbf{Header digest collision resistance.} The 248-bit header digest ($k = 8$ M31 elements) provides a birthday bound of $2^{124}$---a factor of $2^4$ below the $2^{128}$ standard for 256-bit hashes. If this 4-bit gap is deemed insufficient, the ticket readout can be changed to full-state comparison (744 bits, birthday bound $2^{372}$) without modifying the permutation.
 
 % ============================================================
 \section{Operating Modes}
