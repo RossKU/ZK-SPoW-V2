@@ -800,391 +800,78 @@ The approach has clear limitations. Useful computation is not enforced at the co
 % ============================================================
 \appendix
 
-\section{ASIC Architecture Details}
+\section{ASIC Architecture Estimates}
 \label{app:asic}
 
-\subsection{ZK-Symbiotic ASIC Block Diagram}
+\emph{All parameters are reference estimates for a hypothetical 7~nm design. No chip has been fabricated.}
 
-\textbf{Note:} All parameters in this appendix (process node, power, die allocation, SRAM capacity/bandwidth, gate counts) are reference estimates for a hypothetical design. No chip has been fabricated.
-
-\begin{Verbatim}[fontsize=\scriptsize]
-+-- ZK-SPoW ASIC (7nm, ~200W) -----------------------------------------+
-|                                                                        |
-|  +-- Poseidon2 Core Array (50% die) --------------------------------+ |
-|  |                                                                    | |
-|  |  [Core 0] [Core 1] [Core 2] ... [Core N-1]                        | |
-|  |                                                                    | |
-|  |  Each core: Width-24 Poseidon2 pipeline (M31)                     | |
-|  |  Throughput: 1 hash / pipeline_depth cycles per core               | |
-|  |  Mode: Symbiotic (STARK Merkle) or PoW (nonce), per-cycle MUX    | |
-|  |                                                                    | |
-|  |  +--------------------------------------------------------+       | |
-|  |  |  Per-Core Architecture:                                 |       | |
-|  |  |                                                         |       | |
-|  |  |  +---------+     +------------------+   +----------+   |       | |
-|  |  |  |Input MUX|---->|Poseidon2 Pipeline|-->|Output RTR|   |       | |
-|  |  |  +--+--+---+     | [R1][R2]...[R30] |   +--+---+---+   |       | |
-|  |  |     |  |          +------------------+      |   |       |       | |
-|  |  |     |  |                                    |   |       |       | |
-|  |  |  SRAM  nonce                           SRAM  target    |       | |
-|  |  |  data  counter                         write comparator|       | |
-|  |  |  (STARK) (PoW)                        (STARK) (PoW)    |       | |
-|  |  +--------------------------------------------------------+       | |
-|  +--------------------------------------------------------------------+ |
-|                                                                        |
-|  +-- NTT Butterfly Unit (25% die) ----------------------------------+ |
-|  |  M31 multiply-accumulate array                                     | |
-|  |  STARK: polynomial LDE + FRI folding                               | |
-|  |  PoW mode: idle (future: repurpose for other useful computation)   | |
-|  +--------------------------------------------------------------------+ |
-|                                                                        |
-|  +-- SRAM (20% die) ------------------------------------------------+ |
-|  |  32 MB on-chip, ~200 GB/s bandwidth                                | |
-|  |  STARK: eval values, Merkle tree nodes, FRI intermediate data      | |
-|  |  PoW mode: unused (Poseidon2 runs from registers only)             | |
-|  +--------------------------------------------------------------------+ |
-|                                                                        |
-|  +-- Control & I/O (5% die) ----------------------------------------+ |
-|  |  PoW controller: header_state registers, nonce counter, target     | |
-|  |  STARK controller: state machine (trace->NTT->Merkle->FRI)       | |
-|  |  Scheduler: per-cycle STARK/PoW arbitration                        | |
-|  |  Network interface                                                  | |
-|  +--------------------------------------------------------------------+ |
-+------------------------------------------------------------------------+
-\end{Verbatim}
-
-\subsection{Poseidon2 Core Circuit (M31)}
-
-\subsubsection{M31 Field Arithmetic}
-
-\textbf{Modular multiplication:}
-\begin{Verbatim}[fontsize=\small]
-a, b in F_p  where p = 2^31 - 1
-
-c = a * b                      // 31 x 31 -> 62-bit product
-c_hi = c[61:31]                // upper 31 bits
-c_lo = c[30:0]                 // lower 31 bits
-result = c_hi + c_lo           // Mersenne reduction
-if result >= p: result -= p    // final correction
-\end{Verbatim}
-
-Mersenne property: $2^{31} \equiv 1 \pmod{p}$, so the upper bits fold directly into the lower bits with a single addition.
+\subsection{Die Allocation}
 
 \begin{table}[h]
 \centering
 \begin{tabular}{@{}lll@{}}
 \toprule
-Metric & M31 & Goldilocks ($2^{64} - 2^{32} + 1$) \\
+Block & Die share & Function \\
 \midrule
-Multiplier width & $31 \times 31 \to 62$ bit & $64 \times 64 \to 128$ bit \\
-Reduction & 1 addition & shift + sub + add \\
-Gate count & ${\sim}1{,}000$ & ${\sim}3{,}500$ \\
-Latency & 1 cycle & 2--3 cycles \\
-Area ratio & $\mathbf{1\times}$ & $3.5\times$ \\
+Poseidon2 core array & 50\% & Width-24 pipelines (M31), per-cycle input MUX (SRAM data / nonce) \\
+NTT butterfly unit & 25\% & M31 multiply-accumulate: LDE + FRI folding \\
+SRAM & 20\% & 32~MB on-chip, ${\sim}200$~GB/s bandwidth \\
+Control \& I/O & 5\% & PoW/STARK schedulers, network interface \\
 \bottomrule
 \end{tabular}
-\caption{M31 vs Goldilocks field arithmetic.}
-\label{tab:m31-gold}
+\caption{Reference die allocation (7~nm, ${\sim}200$~W).}
+\label{tab:die-alloc}
 \end{table}
 
-\textbf{M31 advantage:} $3.5\times$ more multipliers per die $\to$ $3.5\times$ more Poseidon2 cores $\to$ proportionally higher hashrate.
+\subsection{Core Sizing}
 
-\subsubsection{S-box: $x^5 \bmod p$}
+A fully pipelined Width-24 Poseidon2 core (30 rounds: 8 external $+$ 22 internal) requires ${\sim}1.4$M gates. On a 60M-gate die with 50\% allocated to Poseidon2: \textbf{21 cores at ${\sim}1$~Gperm/s each $\to$ 63G effective PoW hash/s} (3 tickets per permutation).
 
-\begin{Verbatim}[fontsize=\small]
-x --> [MUL] --> x^2
-       [MUL] --> x^4 = (x^2)^2
-       [MUL] --> x^5 = x^4 * x
+M31 multipliers (${\sim}1$K gates, $31 \times 31$ bit) are $3.5\times$ smaller than Goldilocks (${\sim}3.5$K gates, $64 \times 64$ bit), suggesting up to $3.5\times$ more cores per die at equivalent area, before accounting for routing and control overhead.
 
-Critical path: 3 sequential multiplications
-Multipliers per S-box: 3 (with x^2 reuse)
-Gate count (M31): 3 x 1,000 = ~3,000 gates
-\end{Verbatim}
-
-\subsubsection{MDS Matrix (Poseidon2)}
-
-\textbf{External rounds} use a block-circulant structure based on the Stwo/HorizenLabs M4:
-\[
-M_4 = \begin{pmatrix} 5 & 7 & 1 & 3 \\ 4 & 6 & 1 & 1 \\ 1 & 3 & 5 & 7 \\ 1 & 1 & 4 & 6 \end{pmatrix}
-\]
-For each 4-element group:
-\begin{Verbatim}[fontsize=\small]
-s0' = 5*s0 + 7*s1 + s2 + 3*s3
-s1' = 4*s0 + 6*s1 + s2 + s3
-s2' = s0 + 3*s1 + 5*s2 + 7*s3
-s3' = s0 + s1 + 4*s2 + 6*s3
-
-Coefficients in {1,3,4,5,6,7} -- all shift+add, no multipliers
-\end{Verbatim}
-Width~24 = 6 groups of 4. The full external MDS is $\mathrm{circ}(2M_4, M_4, \ldots, M_4)$: compute the element-wise global sum $S = \sum_j g_j$, then apply $M_4(g_i + S)$ for each group $i$---6~$M_4$ evaluations plus one reduction. All arithmetic is \textbf{shift+add only}.
-
-\textbf{Internal rounds} use sparse MDS: $M_I = \mathbf{1}\mathbf{1}^\top + \mathrm{diag}(V)$, where $V = [-2, 1, 2, 4, \ldots, 2^{22}]$ (Plonky3 production values~\cite{plonky3}):
-\begin{Verbatim}[fontsize=\small]
-sum = s0 + s1 + ... + s_{t-1}         // t-1 additions
-s_i' = V[i] * s_i + sum               // V[i] in {powers of 2, -2} -> shift+add
-
-Width 16 (standard): 16 shift-add operations per internal round
-Width 24 (extended): 24 shift-add operations per internal round  (+50%)
-
-Note: V[i] are powers of 2 (or -2), so each operation is a bit
-shift (zero gates) plus one addition (~200 gates). Gate counts in
-Table 5 conservatively use full-multiplier cost (~1K/element).
-\end{Verbatim}
-
-\subsubsection{Full Round vs Partial Round}
-
-\begin{table}[h]
-\centering
-\begin{tabular}{@{}lll@{}}
-\toprule
-Component & External round ($\times 8$) & Internal round ($\times 22$) \\
-\midrule
-S-box & $24 \times 3$K $= 72$K gates & $1 \times 3$K $= 3$K gates \\
-MDS & M4 blocks (${\sim}12$K gates) & diag $+ \mathbf{1}\mathbf{1}^\top$ (${\sim}24$K gates) \\
-Round constants & $24 \times 100 = 2.4$K & $1 \times 100 = 0.1$K \\
-\textbf{Subtotal} & $\mathbf{{\sim}86}$\textbf{K gates} & $\mathbf{{\sim}27}$\textbf{K gates} \\
-\bottomrule
-\end{tabular}
-\caption{Per-round gate counts.}
-\label{tab:rounds}
-\end{table}
-
-\textbf{Total core (pipelined):}
-\[
-8 \times 86\text{K} + 22 \times 27\text{K} = 688\text{K} + 594\text{K} \approx 1{,}282\text{K gates (Width 24)}
-\]
-Standard Width~16: $8 \times 58\text{K} + 14 \times 19\text{K} = 464\text{K} + 266\text{K} \approx 730\text{K gates}$. Overhead: $+76\%$ core logic.
-
-\subsection{Pipeline Design Options}
-
-\subsubsection{Folded (Area Minimal)}
-\begin{Verbatim}[fontsize=\small]
-1 round of hardware x 30 iterations
-
-Area: ~86K gates (one external round circuit, shared)
-Throughput: 1 hash / 30 cycles per core
-@ 1 GHz: ~33M perm/sec per core -> 100M effective hash/sec (3 tickets)
-\end{Verbatim}
-
-\subsubsection{Full Pipeline (Throughput Maximal)}
-\begin{Verbatim}[fontsize=\small]
-30 stages, all rounds instantiated
-
-Area: ~1.4M gates per core (1,326K logic + 108K registers + 3K control)
-Throughput: 1 perm / cycle per core (after pipeline fill)
-Latency: 30 cycles
-@ 1 GHz: 1G perm/sec -> 3G effective hash/sec (3 tickets)
-\end{Verbatim}
-
-\subsubsection{Partial Pipeline (Balanced)}
-\begin{Verbatim}[fontsize=\small]
-k stages x (30/k) iterations
-
-k=5:  ~300K gates, 1 perm / 6 cycles  -> ~167M perm/sec -> 500M eff
-k=10: ~550K gates, 1 perm / 3 cycles  -> ~333M perm/sec -> 1G eff
-k=15: ~700K gates, 1 perm / 2 cycles  -> ~500M perm/sec -> 1.5G eff
-\end{Verbatim}
-
-\subsubsection{Die-Level Comparison}
-
-Assuming 60M gate die, 50\% allocated to Poseidon2 cores (30M gates). Each permutation produces \textbf{3 PoW tickets}:
-
-\begin{table}[h]
-\centering
-\begin{tabular}{@{}lcccc@{}}
-\toprule
-Pipeline style & Gates/core & Cores & Perm/sec/core & Effective hash/sec \\
-\midrule
-Folded ($\times 1$) & 86K & 348 & 33M & \textbf{35G} \\
-5-stage & 300K & 100 & 167M & \textbf{50G} \\
-10-stage & 550K & 54 & 333M & \textbf{54G} \\
-Full ($\times 30$) & 1.4M & 21 & 1G & \textbf{63G} \\
-\bottomrule
-\end{tabular}
-\caption{Die-level comparison (60M gate die, 50\% to Poseidon2, 3 tickets/perm).}
-\label{tab:pipeline}
-\end{table}
-
-Full pipeline achieves highest throughput. The 3-ticket multiplier makes full pipeline particularly effective.
-
-\subsection{Header Pre-absorption}
-
-Block header $H$ is variable-length (parents, tx\_root, timestamp). Hashing it every nonce attempt is wasteful.
-
-\textbf{Optimization:} pre-absorb header into Poseidon2 sponge state.
-\begin{Verbatim}[fontsize=\small]
-On header change (~100 times/sec at 100 BPS):
-  h_H = PoseidonSponge(parent_hashes || tx_merkle_root || timestamp)
-  -> 8 M31 elements, stored in header_state register
-
-Per nonce attempt (compression function mode, width 24):
-  S[0..7]   <- v1   (nonce part 1)
-  S[8..15]  <- v2   (nonce part 2)
-  S[16..23] <- h_H  (from register, constant)
-  -> 1 Poseidon2 permutation (30 rounds)
-  -> output S[0..7], S[8..15], and S[16..23] compared against target (3 tickets)
-\end{Verbatim}
-
-\textbf{Cost per nonce:} exactly 1 Poseidon2 permutation. Header pre-hash is amortized across ${\sim}10$M nonce attempts per header change.
-
-Hardware for pre-absorption: $\mathit{header\_state}$ register: $8 \times 31$ bits $= 248$ bits (${\sim}400$ gates). Negligible compared to Poseidon2 core (${\sim}1.4$M gates).
-
-\subsection{SRAM Bandwidth and Throughput Allocation}
+\subsection{SRAM Bandwidth and $f_{\mathrm{sym}}$}
 \label{sec:sram}
 
-\subsubsection{STARK Memory Access Pattern}
+Each Merkle hash requires 96~bytes of SRAM I/O (32 read left $+$ 32 read right $+$ 32 write parent). The header digest $h_H$ is fixed per phase and held in registers (no SRAM access). PoW ticket comparison is local (comparator, no SRAM write).
 
-Each Poseidon2 Merkle hash requires:
-\begin{Verbatim}[fontsize=\small]
-Read:  left_child  = 8 x 4 bytes = 32 bytes
-Read:  right_child = 8 x 4 bytes = 32 bytes
-Write: parent_node = 8 x 4 bytes = 32 bytes
-Total: 96 bytes per hash
-\end{Verbatim}
+\textbf{Within Merkle phases}, the SRAM-limited Merkle throughput is:
+$$R_{\mathrm{merkle}} = \min\!\left(R_{\mathrm{perm}},\; \frac{\mathrm{BW}}{96}\right)$$
 
-\subsubsection{Throughput Calculation}
-\begin{align*}
-\text{SRAM bandwidth} &\approx 200~\text{GB/s} \quad\text{(ideal; see note below)} \\
-\text{Bytes per STARK hash} &= 96 \\
-\text{STARK hash throughput} &= 200\text{G}/96 \approx 2.08\text{G hash/sec} \\
-\text{Total Poseidon2 throughput} &\approx 21\text{G perm/sec (21 cores @ 1\,GHz)} \\
-\text{Effective PoW hashrate} &\approx 63\text{G hash/sec (3 tickets/perm)} \\
-\text{STARK allocation: } f_{\mathrm{sym}} &= 2.08/21 \approx 9.9\%
-\end{align*}
+For 200~GB/s SRAM: $R_{\mathrm{merkle}} = 200\text{G}/96 \approx 2.08\text{G hash/s}$, well below $R_{\mathrm{perm}} = 21\text{G}$. The remaining $21 - 2.08 = 18.92$G perm/s fill with Pure PoW.
 
-\subsubsection{Interpretation}
+\textbf{Pipelined proof generation} (\S\ref{sec:bottleneck}). With continuous proof demand, NTT and Merkle phases of different proofs overlap. The NTT unit consumes $\mathrm{BW}_{\mathrm{ntt}} \approx 20$~GB/s (${\sim}20$~bytes/butterfly $\times$ 1~Gbfly/s), leaving the remainder for Merkle I/O:
+
+$$f_{\mathrm{sym}} = \min\!\left(1 - \epsilon,\; \frac{(\mathrm{BW} - \mathrm{BW}_{\mathrm{ntt}})/96}{R_{\mathrm{perm}}}\right)$$
+
+where $\epsilon \approx 0.02$ accounts for proof setup, FRI round transitions, and pipeline drain.
 
 \begin{table}[h]
 \centering
-\begin{tabular}{@{}lll@{}}
+\begin{tabular}{@{}lllll@{}}
 \toprule
-Metric & Value & Note \\
+Memory & Bandwidth & $\mathrm{BW} - \mathrm{BW}_{\mathrm{ntt}}$ & $R_{\mathrm{merkle}}$ & $f_{\mathrm{sym}}$ \\
 \midrule
-Hardware STARK fraction ($f$) & ${\sim}10\%$ & SRAM-bandwidth limited \\
-Hardware PoW fraction & ${\sim}90\%$ & Fills idle Poseidon2 cycles \\
-$U$ (usefulness) & $\approx 67\%$ & $t_0/t = 16/24$; width extension overhead = 33\% \\
-STARK proofs/sec & ${\sim}260$ & $2.08\text{G}/8\text{M hashes per proof (parameter-dependent)}$ \\
-PoW hashrate & ${\sim}63$G effective & $21\text{G perm/sec} \times 3$ tickets \\
-$U_{\mathrm{avg}}$ & $\approx 6.7\%$ & $f \times U = 0.10 \times 0.67$ \\
+SRAM 32~MB & 200~GB/s & 180~GB/s & 1.88G & ${\sim}9\%$ \\
+SRAM 64~MB & 400~GB/s & 380~GB/s & 3.96G & ${\sim}19\%$ \\
+HBM3 8~GB & 1.2~TB/s & 1.18~TB/s & 12.3G & ${\sim}59\%$ \\
+HBM3E 16~GB & 2.4~TB/s & 2.38~TB/s & 21G$^\dagger$ & ${\sim}98\%$ \\
 \bottomrule
 \end{tabular}
-\caption{Throughput allocation summary.}
-\label{tab:throughput}
+\caption{$f_{\mathrm{sym}}$ across memory configurations.}
+\label{tab:fsym}
 \end{table}
 
-\textbf{Time-averaged usefulness.} $U_{\mathrm{avg}} = f_{\mathrm{sym}} \times U \approx 0.10 \times 0.67 \approx 6.7\%$ under 200~GB/s SRAM bandwidth with the STARK prover continuously active. This means 6.7\% of all Poseidon2 cycles advance ZK proofs; the remaining 93.3\% provide PoW security only. In a conventional PoW network, $U_{\mathrm{avg}} = 0\%$: all mining energy produces security and nothing else. ZK-SPoW's 6.7\% represents computation that would otherwise have no useful output beyond block validation. $U_{\mathrm{avg}}$ scales with memory bandwidth: ${\sim}13\%$ at 400~GB/s, ${\sim}40\%$ at 1.2~TB/s (\S\ref{sec:sram-scaling}). When the STARK prover is inactive (no ZK demand), $U_{\mathrm{avg}} = 0\%$ and the ASIC operates as a conventional PoW miner.
+$^\dagger$Compute-saturated: $R_{\mathrm{merkle}}$ capped at $R_{\mathrm{perm}} = 21$G. The ${\sim}2\%$ gap from 100\% reflects proof transition overhead ($\epsilon$).
 
-\textbf{$f$ is not waste---it is a throughput allocation metric.} It describes how Poseidon2 cycles are allocated between STARK (memory-bandwidth-limited) and PoW (compute-limited). $U \approx 67\%$ because 8 of 24 input state elements carry $\mathit{header\_digest}$ rather than ZK data. The PoW cycles provide additional network security as a low-marginal-cost byproduct. The two workloads are complementary: PoW is compute-bound, STARK is memory-bound. They share Poseidon2 cores but bottleneck on different resources, achieving near-perfect utilization.
+\textbf{SRAM pipelining constraint.} SRAM configurations (32--64~MB) may lack sufficient capacity to hold two proofs' data simultaneously (each proof requires ${\sim}4$--$8$~MB for trace $+$ extended evaluation). In this case, proof pipelining is limited, and the single-proof sequential model applies: $f_{\mathrm{sym}}$ depends on both $R_{\mathrm{merkle}}/R_{\mathrm{perm}}$ and phase sequencing. The values above assume pipelining is feasible; for SRAM-only designs, $f_{\mathrm{sym}}$ may be slightly lower (${\sim}8$--$17\%$). HBM configurations (8--16~GB) can hold hundreds of proofs and pipeline without constraint.
 
-\textbf{SRAM bandwidth assumption.} The 200~GB/s figure assumes ideal conditions. Routing overhead, bank conflicts, and NTT/Poseidon2 arbitration may reduce effective bandwidth by 10--30\%, proportionally lowering $f_{\mathrm{sym}}$ and $U_{\mathrm{avg}}$. The qualitative conclusions (complementary bottleneck, PoW-dominated allocation) are robust to this range.
-
-\textbf{Width-24 efficiency.} Because STARK Merkle throughput is SRAM-bandwidth-limited at ${\sim}2.08$G hash/sec, Width-24 compression (1~perm/hash) delivers the same ZK proof rate as Width-16 sponge (2~perm/hash) while consuming half the Poseidon2 cycles (${\sim}10\%$ vs ${\sim}20\%$ of core capacity). The freed cycles serve PoW. Higher SRAM bandwidth increases ZK proof \emph{economic throughput} (more proofs/sec) but does not change $U$.
-
-\subsubsection{Increasing STARK Throughput}
-\label{sec:sram-scaling}
-
-\begin{table}[h]
-\centering
-\begin{tabular}{@{}lcccc@{}}
-\toprule
-Memory technology & Bandwidth & $f$ & $U_{\mathrm{avg}}$ ($f \times 67\%$) & Proofs/sec \\
-\midrule
-SRAM 32\,MB & 200\,GB/s & ${\sim}10\%$ & ${\sim}6.7\%$ & ${\sim}260$ \\
-SRAM 64\,MB & 400\,GB/s & ${\sim}20\%$ & ${\sim}13\%$ & ${\sim}520$ \\
-HBM3 8\,GB & 1.2\,TB/s & ${\sim}60\%$ & ${\sim}40\%$ & ${\sim}1{,}560$ \\
-HBM3E 16\,GB & 2.4\,TB/s & ${\sim}100\%^{\dagger}$ & ${\sim}67\%$ & ${\sim}2{,}625^{\dagger}$ \\
-\bottomrule
-\end{tabular}
-\caption{$U_{\mathrm{avg}}$ scaling with memory bandwidth.}
-\label{tab:memory-scaling}
-\end{table}
-
-$\dagger$~At 2.4\,TB/s, SRAM delivers ${\sim}25$G hash/sec, exceeding the 21G perm/sec compute capacity. The STARK fraction saturates at 100\% and proofs/sec is compute-capped at $21\text{G}/8\text{M} \approx 2{,}625$.
-
-With HBM, the STARK fraction approaches 100\%, and nearly all Poseidon2 cycles serve STARK computation simultaneously with PoW. Note: this increases ZK proof \emph{economic throughput} but does not change $U$ (which is bounded by $t_0/t = 16/24 \approx 67\%$, the width extension overhead). Higher memory bandwidth cannot overcome the fundamental width ratio cost.
-
-\subsection{Die Area: kHeavyHash vs Poseidon2-PoW}
-
-\subsubsection{kHeavyHash Core}
-\begin{Verbatim}[fontsize=\small]
-cSHAKE256 hash (x2):        ~80K gates (2x Keccak-f[1600], ~40K each)
-64x64 nibble matrix mul:    ~65K gates (integer matmul + XOR)
-Control:                      ~5K gates
-Total:                      ~150K gates per core
-Throughput:                 ~1G hashes/sec per core @ 1GHz
-
-Note: Keccak-f[1600] gate counts range from ~12K (compact/folded) to
-~120K (fully pipelined). The ~40K estimate assumes a mid-pipeline
-design (4-8 round stages) balancing area and throughput for ASIC mining.
-\end{Verbatim}
-
-\subsubsection{Poseidon2-PoW Core (M31, Width 24, Full Pipeline)}
-\begin{Verbatim}[fontsize=\small]
-S-box circuits:             ~642K gates
-  External: 24 x 3K x 8 rounds = 576K
-  Internal:  1 x 3K x 22 rounds = 66K
-MDS circuits:               ~624K gates
-  External: 6 M4 blocks x ~2K x 8 rounds = 96K (shift+add only)
-  Internal: 24 x 1K x 22 rounds = 528K
-Round constant storage:      ~55K gates (214 constants x 31 bits)
-Pipeline registers:          ~108K gates (24 x 31 bits x 29 stages)
-Input MUX + output router:   ~1K gates
-PoW controller:              ~2K gates (header reg, nonce counter, triple target comparator)
-Total:                       ~1.4M gates per core
-Throughput:                  ~1G perm/sec -> 3G effective hash/sec (3 tickets) @ 1GHz
-\end{Verbatim}
-
-\subsubsection{Chip-Level Comparison}
-
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{@{}lll@{}}
-\toprule
-Metric & kHeavyHash ASIC & Poseidon2-PoW (Width 24) \\
-\midrule
-Core area & ${\sim}150$K gates & ${\sim}1.4$M gates \\
-Cores (60M gate die) & ${\sim}380$ (95\% utilized) & ${\sim}21$ (50\% allocated) \\
-Throughput per core & ${\sim}1$G/s & ${\sim}1$G perm/s $\to$ 3G eff/s (3 tickets) \\
-Total chip hashrate & ${\sim}380$G/s & ${\sim}63$G/s effective \\
-ZK proof capability & None & ${\sim}260$ proofs/sec \\
-Additional components & None & NTT, SRAM, controller \\
-\bottomrule
-\end{tabular}
-\caption{Chip-level comparison: kHeavyHash vs Poseidon2-PoW.}
-\label{tab:chip}
-\end{table}
-
-Poseidon2 has ${\sim}6\times$ lower PoW hashrate per die than kHeavyHash. \textbf{This is absorbed by difficulty adjustment}---all miners use the same hash function, so per-miner revenue is determined by hashrate share, not absolute hashrate. The ZK proof capability provides additional revenue unavailable to kHeavyHash miners.
-
-\subsection{M31 vs Goldilocks ASIC Comparison}
-
-\begin{table}[h]
-\centering
-\begin{tabular}{@{}lll@{}}
-\toprule
-Metric & Goldilocks ($2^{64}-2^{32}+1$) & M31 ($2^{31}-1$) \\
-\midrule
-Element size & 64 bits & 31 bits \\
-Multiplier gates & ${\sim}3{,}500$ & ${\sim}1{,}000$ \\
-Multiplier latency & 2--3 cycles & 1 cycle \\
-Poseidon2 width (ext.) & 12 (compression: $4{+}4{+}4$) & 24 (compression: $8{+}8{+}8$) \\
-Hash output & $4 \times 64 = 256$ bits & $8 \times 31 = 248$ bits \\
-Cores per die (30M gates) & ${\sim}23$ & ${\sim}21$ \\
-STARK ecosystem & Plonky2/Plonky3 & \textbf{Stwo (potential Kaspa choice)} \\
-\bottomrule
-\end{tabular}
-\caption{M31 vs Goldilocks ASIC comparison.}
-\label{tab:m31-vs-gold}
-\end{table}
-
-\textbf{M31 is the natural choice} if Kaspa adopts Stwo. The smaller multiplier (1/3.5 area) enables higher core density and hashrate per die, while matching Stwo's field arithmetic exactly.
+\textbf{NoC area and power.} Delivering 200~GB/s of SRAM bandwidth to 21 Poseidon2 cores requires a Network-on-Chip (NoC) or crossbar interconnect. At 7~nm, a 200~GB/s mesh NoC consumes approximately 1--3\% of die area and 0.5--1.5~W. The 5\% Control \& I/O budget is tight: it must accommodate the NoC, PoW/STARK schedulers, difficulty comparison logic, and network interface. A more realistic breakdown may require 7--10\% for Control, I/O, and interconnect, reducing Poseidon2 core allocation from 50\% to ${\sim}47\%$ (20 cores instead of 21). This is a ${\sim}5\%$ hashrate reduction---non-negligible but does not qualitatively change the economic analysis (\S\ref{sec:econ}). The die allocation should be considered approximate; detailed physical design is beyond this paper's scope.
 
 % ============================================================
-\section{Trace Grinding Analysis}
+\section{Trace Grinding and Triple-Ticket Proofs}
 \label{app:tracegrinding}
 
-We prove that trace selection in Symbiotic mode provides zero advantage for PoW mining under the PRP assumption on Poseidon2.
+The following provides complete formal proofs for the claims in \S\ref{sec:security}.
 
 \subsection{Assumptions}
 
@@ -1369,9 +1056,58 @@ Since Poseidon2 arithmetic dominates on both GPU and ASIC---the computational st
 Since Poseidon2 arithmetic dominates STARK proof time (Table~\ref{tab:free-tickets}), and C.2 shows no meaningful throughput difference ($\pm$0.7\%) between input sources, no proof-time overhead from enabling SPoW (Width-24 + $h_H$ injection) was observed.
 A separate with/without-SPoW proof-time comparison is therefore unnecessary---the per-permutation result established here implies end-to-end equivalence within measurement precision.
 
+\subsection{Output Pseudorandomness}
+\label{sec:gpu-pseudorandom}
+
+Poseidon2 Width-24 output under sequential counter inputs passes all 15 NIST SP~800-22 tests, empirically supporting the PRP assumption (Theorem~1).
+
+\textbf{Setup.} 100 sequences $\times$ 1,000,000 bits. Input: $(\mathrm{counter}, 0, \ldots, 0) \in \mathbb{F}_p^{24}$ ($24 \times 31 = 744$ bits/permutation). $\alpha = 0.01$, pass threshold $\geq 97/100$. Round constants: SplitMix64 (seed \texttt{0x5A4B3C2D1E0FA9B8}).
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+NIST SP~800-22 Test & Proportion & P-value$_T$ & Result \\
+\midrule
+Frequency (Monobit) & 99/100 & 0.5544 & PASS \\
+Block Frequency & 100/100 & 0.7981 & PASS \\
+Runs & 97/100 & 0.2622 & PASS \\
+Longest Run of Ones & 99/100 & 0.4559 & PASS \\
+Serial $\nabla^2_1$ ($m = 16$) & 99/100 & 0.9241 & PASS \\
+Serial $\nabla^2_2$ ($m = 16$) & 99/100 & 0.1719 & PASS \\
+Approximate Entropy ($m = 10$) & 98/100 & 0.9988 & PASS \\
+Cumulative Sums (fwd) & 99/100 & 0.2897 & PASS \\
+Cumulative Sums (bwd) & 99/100 & 0.9114 & PASS \\
+Binary Matrix Rank & 98/100 & 0.7197 & PASS \\
+Non-overlapping Template ($m = 9$, 148) & 148/148 pass & 0.0054$^\dagger$ & PASS \\
+Overlapping Template ($m = 9$) & 99/100 & 0.0712 & PASS \\
+DFT (Spectral) & 99/100 & 0.0457 & PASS \\
+Linear Complexity ($M = 500$) & 99/100 & 0.4190 & PASS \\
+Maurer Universal ($L = 7$) & 98/100 & 0.1538 & PASS \\
+Random Excursions (8 states) & 8/8 pass & 0.0510$^\dagger$ & PASS \\
+Random Excursions Variant (18 states) & 17/18 pass & 0.0320$^\dagger$ & PASS \\
+\bottomrule
+\end{tabular}
+\caption{NIST SP~800-22 results for Width-24 Poseidon2.}
+\label{tab:nist}
+\end{table}
+
+P-value$_T$: uniformity ($\chi^2$ on 10-bin histogram; pass if $> 0.0001$). $^\dagger$Worst across sub-tests. Non-overlapping Template: $N = 8$, $M = 125{,}000$ per NIST STS~2.1.2. REV state $x = +3$: 53/56 (threshold 54), consistent with 18-state false positive rate ($P \approx 10\%$). Linear Complexity: corrected $\pi_6 = 1/48$ (NIST STS~2.1.2 bug: $\pi_6 = 1/32$, $\sum \pi_i > 1$).
+
+\textbf{Inter-ticket independence} (100,000 permutations, 3 tickets: $S[0..7]$, $S[8..15]$, $S[16..23]$):
+\begin{itemize}
+\item \textbf{XOR Monobit}: all pairs $p > 0.01$ ($p = 0.89, 0.45, 0.33$).
+\item \textbf{Pearson correlation}: 192 cross-ticket pairs, mean $|r| = 0.0024$, max $|r| = 0.0079$.
+\item \textbf{Joint success} ($d = 5$): $\chi^2$ $p = 0.97, 0.33, 0.40$.
+\end{itemize}
+
+Tested with SplitMix64-derived round constants. Reproducible: \texttt{analysis/nist\_sp800\_22\_poseidon2.py}.
+
 % ============================================================
 \section{Theorem~1 --- Full Proof and Remarks}
 \label{app:proof}
+\label{app:fullproof}
 
 This appendix contains the complete proof of Theorem~1 (\S\ref{sec:progress}) and supporting remarks deferred from the main text.
 
@@ -1468,9 +1204,27 @@ S.-P.~Merz and {\`A}.~Rodr{\'\i}guez Garc{\'\i}a,
 \url{https://eprint.iacr.org/2026/306}
 
 \bibitem{resultant2026}
+A.~Bak, A.~Bariant, A.~Boeuf, M.~Hostettler, and G.~Jazeron,
 ``Claiming bounties on small scale Poseidon and Poseidon2 instances using resultant-based algebraic attacks,''
 \emph{IACR Cryptology ePrint Archive}, 2026/150, 2026.
 \url{https://eprint.iacr.org/2026/150}
+
+\bibitem{oleksak2025}
+S.~Oleksak, R.~Gazdik, M.~Peresini, and I.~Homoliak,
+``Zk-SNARK Marketplace with Proof of Useful Work,''
+arXiv:2510.09729, 2025.
+\url{https://arxiv.org/abs/2510.09729}
+
+\bibitem{khovratovich2023}
+T.~Ashur, T.~Buschman, and M.~Mahzoun,
+``Algebraic Cryptanalysis of HADES Design Strategy: Application to POSEIDON and Poseidon2,''
+\emph{IACR Cryptology ePrint Archive}, 2023/537, 2023.
+\url{https://eprint.iacr.org/2023/537}
+
+\bibitem{nakamoto}
+J.~Garay, A.~Kiayias, and N.~Leonardos,
+``The Bitcoin Backbone Protocol: Analysis and Applications,''
+in \emph{Eurocrypt 2015}, LNCS 9057, pp.~281--310, 2015.
 
 \end{thebibliography}
 
