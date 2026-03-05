@@ -1315,6 +1315,32 @@ Since Poseidon2 arithmetic dominates STARK proof time (Table~\ref{tab:free-ticke
 A separate with/without-SPoW proof-time comparison is therefore unnecessary---the per-permutation result established here implies end-to-end equivalence within measurement precision.
 
 % ============================================================
+\section{Theorem~1 --- Full Proof and Remarks}
+\label{app:proof}
+
+This appendix contains the complete proof of Theorem~1 (\S\ref{sec:progress}) and supporting remarks deferred from the main text.
+
+\textbf{Setup.} Let $\pi: \mathbb{F}_p^{24} \to \mathbb{F}_p^{24}$ be the Width-24 Poseidon2 permutation. In a STARK Merkle commitment phase, the prover evaluates $\pi$ on inputs $x_1, \ldots, x_P$ where $x_j = (n_{L,j} \| n_{R,j} \| h_H)$, with $n_{L,j}, n_{R,j} \in \mathbb{F}_p^8$ (child hashes) and $h_H \in \mathbb{F}_p^8$ (fixed header digest). $P = \sum_{i=0}^{m}(N_i - 1)$ is the total internal Merkle node count.
+
+\textbf{Lemma (Input Distinctness).} In Circle STARK, leaf-level inputs are distinct by construction (evaluations at $2^\ell$ distinct domain points). At higher levels, a collision requires $\pi(x_j)[0{:}7] = \pi(x_{j'})[0{:}7]$ for distinct $x_j, x_{j'}$. Under PRP, this occurs with probability $\leq p^{-8}$ per pair. Union bound: $\Pr[\text{any collision}] < P^2/(2p^8) < 10^{-60}$ for $P \leq 10^7$. We condition on the ``good event'' $G$ (all inputs distinct).
+
+\textbf{Full proof of Theorem~1.}
+
+\emph{Real world.} The prover evaluates $\pi(x_1), \ldots, \pi(x_P)$ on distinct inputs (conditioned on $G$) and derives $E_j = \{\exists\, k : \text{ticket}_{j,k} < T\}$.
+
+\emph{Ideal world.} Replace $\pi$ with a truly random function $f$. For distinct inputs, $f(x_1), \ldots, f(x_P)$ are independent and uniform over $\mathbb{F}_p^{24}$. Each output decomposes as $\mathbb{F}_p^8 \times \mathbb{F}_p^8 \times \mathbb{F}_p^8$ (product space), so the three ticket comparisons are independent with $\Pr[\text{ticket}_{j,k} < T] = T/p^8$. Hence $\{E_j\}$ are i.i.d.\ Bernoulli($q$) with $q = 1-(1-T/p^8)^3$.
+
+\emph{Reduction.} Suppose a PPT adversary $\mathcal{A}$ distinguishes the real event sequence $(E_1, \ldots, E_P)$ from i.i.d.\ Bernoulli($q$) with advantage $\epsilon$. Construct a PRP distinguisher $\mathcal{D}^{\mathcal{O}}$ with oracle access to either $\pi$ or a random function $f$: $\mathcal{D}$ queries $\mathcal{O}(x_1), \ldots, \mathcal{O}(x_P)$, extracts ticket events $E_j = \{\exists\, k : \mathcal{O}(x_j)[8k{:}8k{+}8] < T\}$, and runs $\mathcal{A}$ on $(E_1, \ldots, E_P)$. When $\mathcal{O} = \pi$, the view is identical to the real world; when $\mathcal{O} = f$, the view is the ideal world (i.i.d.\ Bernoulli by the argument above). Hence $\mathcal{D}$ distinguishes $\pi$ from $f$ with the same advantage $\epsilon$, contradicting the PRP assumption. \qed
+
+\textbf{PRP--PRF switching.} The statistical distance between a random permutation and a random function on $P$ queries is $\leq P^2/(2p^{24}) < 10^{-210}$ for $P = 10^7$. Absorbed into $\mathrm{negl}(\kappa)$.
+
+\textbf{Structured inputs.} Merkle feedback (parent outputs $\to$ child inputs) and Fiat-Shamir cascades create non-i.i.d.\ inputs. The PRP guarantee holds for \emph{any} distinct inputs regardless of generation method; any weakness for structured inputs would constitute a Poseidon2 break.
+
+\textbf{Side information.} A miner observes STARK execution state (tree level, NTT progress) in addition to PoW outcomes. Under PRP, this does not help predict future PoW outcomes: $\pi(x_j)$ is pseudorandom regardless of how $x_j$ was generated or what the miner knows about computation progress.
+
+\textbf{Consensus sufficiency.} Nakamoto consensus security proofs---chain-based~\cite{nakamoto} and DAG-based~\cite{dagknight}---rely on Poisson block arrivals for selfish-mining bounds and difficulty adjustment convergence. The adversary in both frameworks is PPT, so computational indistinguishability from i.i.d.\ preserves all security bounds.
+
+% ============================================================
 \begin{thebibliography}{10}
 
 \bibitem{ball2017}
