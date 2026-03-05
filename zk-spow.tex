@@ -306,14 +306,11 @@ B: Width 20 & 20 & Compression & 1 & 1 \\
 \textbf{Design~A} requires no Stwo modification but costs 4~permutations per PoW draw (2~Merkle $+$ 2~header binding). \textbf{Design~B} provides only 4~M31 elements (124 bits) for header digest---birthday bound $2^{62}$, insufficient for 128-bit security. \textbf{Design~C (selected)} achieves symmetric $8{+}8{+}8$ I/O with 1~permutation per Merkle hash and per PoW draw, 248-bit header digest (birthday bound $2^{124}$), and three PoW tickets per permutation. Width~24 is within the Poseidon2 paper's analyzed parameter range~\cite{poseidon2}.
 
 \textbf{Proposed Extension (Design~C):}
-\label{sec:design-c}
 
 \begin{Verbatim}[fontsize=\small]
 Standard Stwo:    Width t0 = 16,  Sponge (rate 8, capacity 8)
 Proposed ZK-SPoW: Width t  = 24,  Compression function (all 24 visible)
 \end{Verbatim}
-
-\textbf{Impact on Poseidon2 internals:}
 
 \begin{table}[h]
 \centering
@@ -486,6 +483,7 @@ loop:
 Identical Poseidon2 pipeline, identical throughput. $U = 0\%$---no ZK proof is being computed. The ASIC provides network security only.
 
 \subsection{Linear Mode Transition}
+\label{sec:transition}
 
 \begin{Verbatim}[fontsize=\small]
 +-- Poseidon2 Pipeline (always 100% utilized) ---------+
@@ -943,7 +941,7 @@ In Width-24 compression, the Merkle parent output $S[0..7]$ becomes an input to 
 \subsection{Triple-Ticket Independence}
 \label{app:triple-ticket}
 
-The three PoW tickets $\mathit{pow\_ticket}_0 = S[0..7]$, $\mathit{pow\_ticket}_1 = S[8..15]$, and $\mathit{pow\_ticket}_2 = S[16..23]$ are outputs of the same Poseidon2 permutation and therefore deterministically linked. We show that under PRP, this linkage carries no exploitable statistical correlation.
+The three PoW tickets $\mathrm{ticket}_0 = S[0..7]$, $\mathrm{ticket}_1 = S[8..15]$, and $\mathrm{ticket}_2 = S[16..23]$ are outputs of the same Poseidon2 permutation and therefore deterministically linked. We show that under PRP, this linkage carries no exploitable statistical correlation.
 
 \begin{proposition}
 Under the PRP assumption on Poseidon2, the joint distribution of $\mathrm{ticket}_0$, $\mathrm{ticket}_1$, and $\mathrm{ticket}_2$ is computationally indistinguishable from three mutually independent uniform samples over $\mathbb{F}_p^8$.
@@ -983,9 +981,9 @@ We implement a complete Width-24 Poseidon2 Circle STARK prover in CUDA---iCFFT/C
 \subsection{PoW Tickets as a Byproduct of ZK}
 \label{sec:gpu-freetickets}
 
-\textbf{Claim (\S\ref{sec:symbiotic}).} Every Poseidon2 Merkle hash in the STARK computation simultaneously advances the ZK proof and produces 3~PoW tickets. A standard Width-16 Stwo prover produces 0~PoW tickets from the same ZK computation.
+\textbf{Claim (\S\ref{sec:symbiotic}).} Every Poseidon2 Merkle hash in the STARK simultaneously advances the ZK proof and produces 3~PoW tickets. A standard Width-16 prover produces 0~tickets.
 
-\textbf{Method.} Run the GPU STARK prover for trace sizes $2^8$ through $2^{22}$. For each proof, count the total Poseidon2 Merkle permutations (trace commitment + quotient commitment + FRI layer commitments). Each permutation produces 3~PoW tickets. Measure proof time and derive the byproduct ticket generation rate.
+\textbf{Method.} Run the GPU STARK prover for trace sizes $2^8$ through $2^{22}$. Count Merkle permutations per proof. Each produces 3~tickets.
 
 \begin{table}[h]
 \centering
@@ -1008,22 +1006,19 @@ $k$ & Trace & STARK (ms) & Merkle perms & Proofs/s & PoW tickets/s \\
 \label{tab:free-tickets}
 \end{table}
 
-\textbf{Interpretation.} No measurable throughput difference was observed between input sources (C.2: ratio $99.3\% \pm 0.3\%$, $p{=}0.006$; the 0.7\% gap is GPU global memory I/O, not algorithmic). Poseidon2's 30-round arithmetic dominates execution time; the input fetch constitutes a negligible fraction of total cycles. Whether $S[16..23]$ carries $\mathit{header\_digest}$ or zeros, the same permutation executes. No proof-time difference was observed with versus without header binding. Pure ZK (Width-16) structurally lacks header binding and produces 0~PoW tickets. ZK-SPoW converts all Merkle hashes into PoW tickets as a computational byproduct.
-
-Peak throughput occurs at $k = 20$ (trace size $2^{20}$): 136.39M PoW tickets/s. At $k = 22$, STARK overhead (NTT, constraint evaluation) dominates, reducing proofs/s to 6.1 and tickets/s to 115.46M. The optimal operating point depends on the ZK workload mix.
+Peak throughput: 136.39M PoW tickets/s at $\ell = 20$. At $\ell = 22$, STARK overhead (NTT, constraint evaluation) dominates.
 
 \subsection{Input Independence}
 \label{sec:gpu-invariance}
 
-\textbf{Claim (\S\ref{sec:modes}).} No meaningful throughput difference is expected between Poseidon2 permutations with random nonce input (Pure PoW mode) versus structured Merkle data input (Symbiotic mode), because the 30-round arithmetic dominates execution time.
+\textbf{Claim (\S\ref{sec:transition}).} Poseidon2 permutation throughput is independent of input source---random nonces (Pure PoW) vs structured Merkle data (Symbiotic mode).
 
-\textbf{Method.} Two batched GPU kernels using identical Poseidon2 ($W=24$, $R_f=8$, $R_p=22$), identical batch size ($2^{20}$), identical thread configuration:
+\textbf{Method.} Two batched GPU kernels, identical Poseidon2, identical batch size ($2^{20}$):
 \begin{itemize}
-\item \textbf{k\_pow\_batch}: Input from registers (nonce + header\_digest from constant memory). No global memory access. Simulates ASIC Pure PoW mode.
-\item \textbf{k\_merkle\_batch}: Input from global memory (16 words simulating left\_child + right\_child) + header\_digest from constant memory. Writes 8 words back (parent hash). Simulates ASIC Symbiotic mode.
+\item \textbf{k\_pow\_batch}: Input from registers (nonce + header\_digest from constant memory). No global memory access.
+\item \textbf{k\_merkle\_batch}: Input from global memory (16 words) + header\_digest from constant memory. Writes 8 words back.
 \end{itemize}
-Both kernels check all 3 output tickets against a difficulty target.
-To eliminate ordering bias (the second kernel benefits from GPU boost warmup), each kernel receives a 3-second warmup phase (discarded), and execution order alternates across 10 measurement rounds: odd rounds run Random first ($\text{R}{\to}\text{M}$), even runs run Merkle first ($\text{M}{\to}\text{R}$).
+3-second warmup per kernel (discarded). 10 measurement rounds with alternating execution order.
 
 \begin{table}[h]
 \centering
@@ -1052,16 +1047,12 @@ Run & Random (Mperm/s) & Merkle (Mperm/s) & Ratio & Order \\
 \textbf{Interpretation.}
 The difference is statistically significant ($p < 0.001$) but practically negligible (0.7\%). The gap is attributable to GPU global memory I/O overhead in the Merkle kernel (16-word read $+$ 8-word write per permutation), not to input-dependent Poseidon2 computation. Poseidon2's 30-round arithmetic dominates execution time regardless of input source. Execution order has no measurable effect. On ASIC (SRAM latency ${\sim}1$ cycle vs GPU global memory ${\sim}$hundreds of cycles), this I/O gap is expected to be substantially reduced.
 
-\textbf{Corollary: no observed proof-time penalty from SPoW.}
-Since Poseidon2 arithmetic dominates STARK proof time (Table~\ref{tab:free-tickets}), and C.2 shows no meaningful throughput difference ($\pm$0.7\%) between input sources, no proof-time overhead from enabling SPoW (Width-24 + $h_H$ injection) was observed.
-A separate with/without-SPoW proof-time comparison is therefore unnecessary---the per-permutation result established here implies end-to-end equivalence within measurement precision.
-
 \subsection{Output Pseudorandomness}
 \label{sec:gpu-pseudorandom}
 
 Poseidon2 Width-24 output under sequential counter inputs passes all 15 NIST SP~800-22 tests, empirically supporting the PRP assumption (Theorem~1).
 
-\textbf{Setup.} 100 sequences $\times$ 1,000,000 bits. Input: $(\mathrm{counter}, 0, \ldots, 0) \in \mathbb{F}_p^{24}$ ($24 \times 31 = 744$ bits/permutation). $\alpha = 0.01$, pass threshold $\geq 97/100$. Round constants: SplitMix64 (seed \texttt{0x5A4B3C2D1E0FA9B8}).
+\textbf{Setup.} 100 sequences $\times$ 1,000,000 bits. Input: $(\mathrm{counter}, 0, \ldots, 0) \in \mathbb{F}_p^{24}$ ($24 \times 31 = 744$ bits/permutation). $\alpha = 0.01$, pass threshold $\geq 97/100$ (\S\ref{sec:width}). Round constants: SplitMix64 (seed \texttt{0x5A4B3C2D1E0FA9B8}).
 
 \begin{table}[h]
 \centering
