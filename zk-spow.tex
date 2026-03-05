@@ -442,6 +442,8 @@ Neither mechanism is mandatory for consensus. The current design treats mode dis
 \section{Operating Modes}
 \label{sec:modes}
 
+The following analysis assumes a hypothetical Poseidon2 ASIC; architecture estimates are in Appendix~\ref{app:asic}.
+
 \subsection{Symbiotic Mode (Stwo Prover Active)}
 \label{sec:symbiotic}
 
@@ -465,20 +467,9 @@ pow_ticket2   = S[16..23]   <- checked against PoW target
 if S[0..7] < target OR S[8..15] < target OR S[16..23] < target -> BLOCK FOUND
 \end{Verbatim}
 
-Every Poseidon2 invocation in the STARK computation simultaneously:
-\begin{itemize}
-\item \textbf{(a)} Advances the ZK proof (economic value---the useful work that drives the permutation)
-\item \textbf{(b)} Produces PoW tickets (network security---mathematical byproduct of the same permutation)
-\end{itemize}
-GPU validation confirms up to 136.39M PoW tickets/s as a byproduct of STARK proof generation (Appendix~\ref{sec:gpu-freetickets}).
+Every permutation simultaneously advances the ZK proof and produces PoW tickets ($U = 100\%$). GPU validation confirms up to 136.39M PoW tickets/s as a byproduct of STARK proof generation (Appendix~\ref{sec:gpu-freetickets}).
 
-The miner does not choose the Merkle inputs $(n_L, n_R)$---they are determined by the STARK computation. The ``random exploration'' required for PoW occurs naturally because STARK Merkle tree hashes are pseudorandom from the miner's perspective.
-
-$U = t_0/t = 16/24 \approx 67\%$. The 33\% usefulness gap is the width extension overhead: 8 of 24 input state elements carry $\mathit{header\_digest}$ rather than ZK data. There is no ``ZK only'' mode---every Width-24 permutation produces PoW tickets, regardless of input.
-
-\textbf{Header digest and Merkle tree.} Because Poseidon2's MDS matrix provides full diffusion, the $\mathit{merkle\_parent}$ output depends on $\mathit{header\_digest}$. This means the STARK Merkle tree is bound to a specific block header. At ${\sim}2$G hash/sec, a complete Merkle tree builds within one block interval (10\,ms at 100~BPS). The Stwo-Kaspa verifier reconstructs Merkle nodes using the same Width-24 compression with the known $\mathit{header\_digest}$.
-
-\textbf{Header freshness.} A STARK proof spans multiple Merkle commitment phases (step~3 and FRI rounds)---typically $O(10)$ phases---and takes seconds to complete (dominated by NTT and trace generation). The $\mathit{header\_digest}$ is fixed per Merkle tree phase; each phase completes within one block interval ($<10$\,ms at ${\sim}2$G hash/sec with ${\sim}2.08$G hash throughput per phase). Between phases, the $\mathit{header\_digest}$ register updates to the current block. PoW tickets from each phase are valid for that phase's header. Maximum staleness is 1~block (10\,ms): a PoW ticket found at the end of a Merkle phase references a $\mathit{header\_digest}$ that is at most one block behind the DAG tip. In DAGKnight's DAG structure~\cite{dagknight}, this is well within tolerance---DAGKnight accepts blocks with parent sets up to $k$ blocks deep (where $k$ is the anticone parameter, typically $k \geq 10$ at 100~BPS), and 1-block staleness is indistinguishable from normal parallel block production.
+\textbf{Header freshness.} A STARK proof spans multiple Merkle commitment phases---typically $O(10)$. The header digest is fixed per phase; between phases it updates to the current chain tip. Maximum staleness is one Merkle phase (\S\ref{sec:staleness}).
 
 \subsection{Pure PoW Mode (No ZK Demand)}
 \label{sec:pure-pow}
@@ -492,9 +483,7 @@ loop:
   if S[0..7] < target OR S[8..15] < target OR S[16..23] < target -> BLOCK FOUND
 \end{Verbatim}
 
-Identical Poseidon2 pipeline, identical throughput. The only difference is the input source: random/sequential nonces instead of STARK Merkle children.
-
-$U = 0\%$. No ZK proof is being computed. The ASIC provides network security only, equivalent to any conventional PoW miner. This is not waste---security has value---but it is not useful work in the ZK-SPoW sense.
+Identical Poseidon2 pipeline, identical throughput. $U = 0\%$---no ZK proof is being computed. The ASIC provides network security only.
 
 \subsection{Linear Mode Transition}
 
@@ -505,67 +494,44 @@ $U = 0\%$. No ZK proof is being computed. The ASIC provides network security onl
 |    SRAM data ready  -> STARK Merkle hash (Symbiotic)  |
 |    SRAM not ready   -> PoW nonce hash    (PoW)        |
 |                                                       |
-|  Switching cost: 0 cycles (combinational MUX, ~300 gates) |
+|  Switching cost: near-zero throughput overhead (combinational MUX) |
 |  Hashrate: invariant across all modes                 |
 +-------------------------------------------------------+
 \end{Verbatim}
 
-The transition between Symbiotic and Pure PoW is \textbf{per-cycle and linear}, not a discrete mode switch. When the Poseidon2 pipeline is executing STARK computation, that cycle is Symbiotic. When SRAM data is not ready, a random nonce hash is substituted and that cycle is PoW. The pipeline is always full---the ratio of Symbiotic to PoW cycles is determined by SRAM bandwidth, not by difficulty or protocol parameters.
-
-\subsection{Hashrate Invariance}
-
-\begin{proposition}
-Total PoW hashrate $\mathcal{H}$ is independent of the operating mode.
-\end{proposition}
-\begin{proof}[Argument]
-$\mathcal{H} = N_{\mathrm{cores}} \times \mathrm{throughput\_per\_core}$. Each core's throughput is 1~hash per $\mathrm{pipeline\_depth}$ cycles (fully pipelined), regardless of whether the input is a STARK Merkle pair or a random nonce. Input MUX adds zero latency (combinational logic). Therefore $\mathcal{H}$ is constant across Symbiotic, Pure PoW, and any mixed state.
-\end{proof}
-
-\textbf{GPU validation.} On GPU, no meaningful throughput difference was observed between input sources: batched Poseidon2 with random nonce inputs (register-only, simulating Pure PoW) and with structured Merkle inputs (global memory read/write, simulating Symbiotic mode) achieve a mean throughput ratio of $99.3\% \pm 0.3\%$ across 10 runs with alternating execution order (95\% CI: $[99.1\%, 99.5\%]$; Appendix~\ref{sec:gpu-invariance}). The 0.7\% gap is attributable to GPU global memory I/O overhead in the Merkle kernel, not input-dependent computation. Poseidon2's 30-round arithmetic dominates execution time; the input fetch is a negligible fraction of total cycles. On an ASIC with on-chip SRAM (${\sim}1$ cycle latency), we expect the same trend, as the compute dominance is even stronger.
-
-\subsection{Difficulty Independence}
-
-$U$ is determined by ZK demand and width ratio, not by PoW difficulty.
-
-\begin{table}[h]
-\centering
-\begin{tabular}{@{}lcl@{}}
-\toprule
-Condition & $U$ & Rationale \\
-\midrule
-Stwo Prover active, any difficulty & $\approx 67\%$ & ZK proof, minus width overhead \\
-No ZK demand, any difficulty & $0\%$ & Pure PoW = security only \\
-\bottomrule
-\end{tabular}
-\caption{Usefulness is independent of difficulty.}
-\label{tab:difficulty}
-\end{table}
-
-Difficulty affects how many hashes are needed to find a block, but does not change $U$. Whether difficulty is 8M or 188G, the ASIC either computes ZK proofs ($U \approx 67\%$) or grinds nonces ($U = 0\%$). The ratio of STARK-to-PoW cycles within the pipeline is determined by SRAM bandwidth (a hardware constant), not by the network's difficulty target.
+The transition is \textbf{per-cycle and linear}, not a discrete mode switch. The pipeline is always full---the ratio is determined by SRAM bandwidth. Total PoW hashrate $\mathcal{H} = N_{\mathrm{cores}} \times R_{\mathrm{core}}$ is therefore invariant across operating modes (GPU validation: Merkle/Random throughput ratio $99.3\% \pm 0.3\%$; Appendix~\ref{sec:gpu-invariance}).
 
 \subsection{Complementary Bottleneck Structure}
 \label{sec:bottleneck}
 
-The simultaneous execution of PoW and STARK is possible because they bottleneck on different resources:
+\textbf{STARK data path.} The STARK pipeline alternates between NTT-bound and Poseidon2-bound phases:
 
-\begin{table}[h]
-\centering
-\begin{tabular}{@{}lcccc@{}}
-\toprule
-Resource & PoW & STARK & Combined \\
-\midrule
-Poseidon2 cores & \textbf{100\%} (compute-bound) & Low (SRAM-starved) & ${\sim}$\textbf{100\%} \\
-NTT unit & 0\% & \textbf{100\%} & \textbf{100\%} \\
-SRAM bandwidth & 0\% (registers only) & \textbf{100\%} (memory-bound) & \textbf{100\%} \\
-\bottomrule
-\end{tabular}
-\caption{Complementary bottleneck structure.}
-\label{tab:bottleneck}
-\end{table}
+\begin{Verbatim}[fontsize=\small]
+Phase:    Trace -> NTT(LDE) -> Merkle -> Fiat-Shamir -> [FRI fold(NTT) -> FRI Merkle] x m
+HW:       CPU/NTT   NTT unit   Poseidon2   CPU         NTT unit        Poseidon2
+SRAM:     write     read/write read/write   ---         read/write      read/write
+Poseidon2: Pure PoW  Pure PoW  Symbiotic+PoW Pure PoW   Pure PoW       Symbiotic+PoW
+\end{Verbatim}
 
-PoW is compute-bound (limited by Poseidon2 throughput). STARK is memory-bound (limited by SRAM bandwidth feeding Merkle data to Poseidon2). They share Poseidon2 cores but contend on different bottleneck resources, achieving near-perfect utilization of all hardware components simultaneously. Under 200~GB/s SRAM bandwidth, the STARK allocation is $f_{\mathrm{sym}} \approx 10\%$ of Poseidon2 cycles, yielding $U_{\mathrm{avg}} = f_{\mathrm{sym}} \times U \approx 6.7\%$ time-averaged usefulness (see \S\ref{sec:sram} for derivation). This complementary structure is the foundation of the economic analysis in \S\ref{sec:pareto}.
+\textbf{Single-proof model.} Within a single proof, phases are sequential: during Merkle phases, Poseidon2 cores are fed Merkle data from memory (Symbiotic) up to the bandwidth limit; during NTT/FRI folding phases, the NTT unit uses memory and Poseidon2 runs 100\% Pure PoW.
 
-\textbf{Width-24 efficiency.} Width-24 compression uses 1~permutation per Merkle hash versus Width-16 sponge's 2~permutations. This halves STARK's Poseidon2 cycle consumption, freeing more cycles for PoW. The STARK proof generation rate itself remains SRAM-bandwidth-bound (see \S\ref{sec:sram} for quantitative analysis).
+\textbf{Pipelined proof generation.} With continuous proof demand, multiple proofs are in-flight simultaneously. While proof $n$ is in its NTT phase, proof $n{-}1$'s Merkle data is already in memory and can feed Poseidon2 cores. The NTT and Merkle phases of different proofs overlap:
+
+\begin{Verbatim}[fontsize=\small]
+Proof n-1:        [NTT] -> [Merkle] -> [NTT] -> ...
+Proof n  :                 [NTT] -> [Merkle] -> ...
+Poseidon2:         PoW      Sym       Sym      Sym
+\end{Verbatim}
+
+In this model, Poseidon2 is nearly always fed Merkle data. The constraint is no longer phase sequencing but \textbf{memory bandwidth contention}: NTT and Merkle I/O share the memory bus simultaneously.
+
+\textbf{$f_{\mathrm{sym}}$ derivation (pipelined).} Each Merkle hash requires 96~bytes of memory I/O (32 read left $+$ 32 read right $+$ 32 write parent). NTT butterflies require ${\sim}20$~bytes each (read 2 $+$ twiddle, write 2 M31 elements) at ${\sim}1$~Gbfly/s, consuming $\mathrm{BW}_{\mathrm{ntt}} \approx 20$~GB/s. The effective bandwidth available for Merkle I/O is $\mathrm{BW} - \mathrm{BW}_{\mathrm{ntt}}$:
+
+$$f_{\mathrm{sym}} = \min\!\left(1 - \epsilon,\; \frac{(\mathrm{BW} - \mathrm{BW}_{\mathrm{ntt}})/96}{R_{\mathrm{perm}}}\right)$$
+
+where $\epsilon \approx 0.02$ accounts for proof setup, FRI round transitions, and pipeline drain between proofs. See Appendix~\ref{sec:sram} for concrete values.
+
+\textbf{Width-24 efficiency.} Compression function mode halves the permutation count per Merkle hash ($2 \to 1$ vs sponge mode, \S\ref{sec:width}), but each Width-24 permutation is larger (30 rounds vs 22). Net cycle reduction is ${\sim}32\%$ (30 vs 44 rounds), not 50\%.
 
 % ============================================================
 \section{Pareto Analysis}
