@@ -65,7 +65,7 @@ $$U = \frac{\text{ZK-contributing trials}}{\text{total mining trials}}$$
 
 The per-permutation data overhead is 8/24 ≈ 33% (header digest occupying 8 of 24 state elements); this is the cost of PoW integration, not a usefulness loss.
 
-**System-level usefulness.** $U$ is a per-permutation metric. On ASIC, the Poseidon2 pipeline is compute-bound while STARK Merkle hashing is SRAM-bandwidth-limited, so only a fraction $f_{sym}$ of Poseidon2 cycles execute in Symbiotic mode. The system-level time-averaged usefulness is $U_{sys} = f_{sym} \times U$, projected to range from ~9% (32 MB SRAM) to ~98% (HBM3E 2.4 TB/s, compute-saturated) depending on memory configuration (§5.4, Appendix A). With pipelined proof generation, Number Theoretic Transform (NTT) and Merkle phases of different proofs overlap, and the constraint is memory bandwidth contention rather than phase sequencing.
+**System-level usefulness.** $U$ is a per-permutation metric. On ASIC, the Poseidon2 pipeline is compute-bound while STARK Merkle hashing is SRAM-bandwidth-limited, so only a fraction $f_{sym}$ of Poseidon2 cycles execute in Symbiotic mode. The system-level time-averaged usefulness is $U_{sys} = f_{sym} \times U$, projected to range from ~9% (32 MB SRAM) to ~98% (HBM3E (High Bandwidth Memory 3E) 2.4 TB/s, compute-saturated) depending on memory configuration (§5.4, Appendix A). With pipelined proof generation, Number Theoretic Transform (NTT) and Merkle phases of different proofs overlap, and the constraint is memory bandwidth contention rather than phase sequencing.
 
 ### 1.4 Our Solution: Permutation-Level PoW Extraction
 
@@ -85,7 +85,7 @@ This addresses the challenge of combining useful computation with memoryless PoW
 
 ### 1.5 Contributions
 
-1. **Memoryless PoW from non-memoryless computation.** We formalize *computational* progress-freedom for PoW schemes embedded in stateful computations and prove that ZK-SPoW achieves it under the PRP assumption on Poseidon2 (Theorem 1, §2). Header staleness is bounded to one Merkle commitment phase (~3 ms GPU (measured)).
+1. **Memoryless PoW from non-memoryless computation.** We formalize *computational* progress-freedom for PoW schemes embedded in stateful computations and prove that ZK-SPoW achieves it under the PRP assumption on Poseidon2 (Theorem 1, §2). Header staleness is bounded to one Merkle commitment phase (~3.4 ms GPU, measured).
 
 2. **Width-24 Poseidon2 in compression function mode.** We specify Width-24 Poseidon2 over M31 (1 permutation per Merkle hash, vs 2 in sponge mode) with $R_p = 22$ internal rounds targeting 128-bit security (§6.2). The 24-element output naturally partitions into a Merkle parent (advancing the ZK proof) and two additional PoW tickets—the dual-purpose output that makes ZK-SPoW possible (§4.2–§4.3).
 
@@ -99,7 +99,7 @@ This addresses the challenge of combining useful computation with memoryless PoW
 
 A PoW scheme is *progress-free* if each trial's success probability is independent of all prior outcomes—i.e., the success events form an i.i.d. Bernoulli($q$) sequence, yielding Poisson block arrivals [16]. SHA-256 and kHeavyHash achieve this information-theoretically under the random oracle model.
 
-Poseidon2 is not a random oracle, so we use a computational relaxation: a PoW scheme is *computationally progress-free* if no PPT adversary can distinguish the trial outcomes from i.i.d. Bernoulli($q$) with non-negligible advantage. This suffices for Nakamoto consensus security: the adversary in these proofs is PPT [16, 5], so computational indistinguishability from i.i.d. preserves all security bounds.
+Poseidon2 is not a random oracle, so we use a computational relaxation: a PoW scheme is *computationally progress-free* if no probabilistic polynomial-time (PPT) adversary can distinguish the trial outcomes from i.i.d. Bernoulli($q$) with non-negligible advantage. This suffices for Nakamoto consensus security: the adversary in these proofs is PPT [16, 5], so computational indistinguishability from i.i.d. preserves all security bounds.
 
 **Why proof-level PoW fails.** If proof completion is the PoW event, the scheme is not progress-free at any level of assumption: a miner at 80% completion has observably higher conditional success probability than one at 10%.
 
@@ -174,7 +174,7 @@ In Symbiotic mode, the header digest $h_H$ is fixed for one Merkle commitment ph
 | Internal rounds $R_p$ | 14 |
 | S-box exponent | $d = 5$ |
 | Merkle hash | 2 permutations per node (sponge: absorb left[8], absorb right[8]) |
-| Commitment hash | Blake2s (base layer), Poseidon over Felt252 (recursive proofs) |
+| Commitment hash | Blake2s (base layer), Poseidon over Felt252 (252-bit field element; recursive proofs) |
 
 **Note:** All security claims in this paper assume final production round constants. As of writing, production round constants for Poseidon2 over M31 have not been finalized; the Stwo implementation uses development placeholders (`EXTERNAL_ROUND_CONSTS` and `INTERNAL_ROUND_CONSTS` uniformly set to `1234`).
 
@@ -193,7 +193,7 @@ inner        = cSHAKE256_PoW(pre_pow_hash || timestamp || [0u8;32] || nonce)
 pow_hash     = cSHAKE256_Heavy(M * inner XOR inner)
 valid iff pow_hash < target
 ```
-where $M$ is a 64×64 full-rank matrix over 4-bit nibbles (generated from `pre_pow_hash` via XoShiRo256++), nonce is 8 bytes (`u64`).
+where $M$ is a 64×64 full-rank matrix over 4-bit nibbles (generated from `pre_pow_hash` via xoshiro256++), nonce is 8 bytes (`u64`).
 
 **Proposed (Poseidon2-PoW):**
 ```
@@ -338,7 +338,7 @@ The following analysis assumes a hypothetical Poseidon2 ASIC; architecture estim
 When ZK proof demand exists, the ASIC runs the Stwo prover. The STARK proof generation pipeline:
 ```
 1. Trace generation       -> circuit evaluation
-2. NTT (LDE)              -> polynomial domain extension
+2. NTT (Low-Degree Extension) -> polynomial domain extension
 3. Merkle tree            -> Poseidon2 hashing (PoW tickets appear here)
 4. Fiat-Shamir challenge  -> derived from Merkle root
 5. FRI rounds             -> folding + commitment
@@ -356,7 +356,7 @@ if S[0..7] < target OR S[8..15] < target OR S[16..23] < target -> BLOCK FOUND
 
 Every permutation simultaneously advances the ZK proof and produces PoW tickets ($U = 100\%$). GPU validation confirms up to 136.39M PoW tickets/s as a byproduct of STARK proof generation (Appendix C.1).
 
-**Header freshness.** A STARK proof spans multiple Merkle commitment phases—typically $O(10)$. The header digest is fixed per phase; between phases it updates to the current chain tip. Maximum staleness is one Merkle phase (§2.3).
+**Header freshness.** A STARK proof spans multiple Merkle commitment phases—typically $O(\ell)$ (e.g., ~21 at $\ell = 20$). The header digest is fixed per phase; between phases it updates to the current chain tip. Maximum staleness is one Merkle phase (§2.3).
 
 ### 5.2 Pure PoW Mode (No ZK Demand)
 
@@ -426,15 +426,15 @@ where $\epsilon \approx 0.02$ accounts for proof setup, FRI round transitions, a
 
 **Sponge mode vs compression function mode.** Poseidon2 [3] provides 128-bit security in sponge mode via an indifferentiability argument: with capacity $c = 8$ M31 elements (248 bits), the sponge construction is indifferentiable from a random oracle up to $2^{124}$ queries. ZK-SPoW operates in compression function mode (§4.2), where all 24 input elements are visible—there is no hidden capacity. Security in this mode relies on different, more direct properties of the permutation $\pi$:
 
-- **Collision resistance:** Finding $x \neq x'$ with $\pi(x)[0:7] = \pi(x')[0:7]$ requires $\Omega(2^{124})$ work (birthday bound on 248-bit output). This secures STARK Merkle binding.
-- **Preimage resistance:** Finding $x$ with $\pi(x)[0:7] < T$ requires $\Omega(1/p_t)$ work. This secures PoW.
+- **Collision resistance:** Finding $x \neq x'$ with $\pi(x)[0..7] = \pi(x')[0..7]$ requires $\Omega(2^{124})$ work (birthday bound on 248-bit output). This secures STARK Merkle binding.
+- **Preimage resistance:** Finding $x$ with $\pi(x)[0..7] < T$ requires $\Omega(1/p_t)$ work. This secures PoW.
 - **PRP (pseudorandom permutation):** Outputs are computationally indistinguishable from random, regardless of input structure. This secures progress-freedom (Theorem 1).
 
 These are strictly weaker assumptions than sponge-mode indifferentiability—collision/preimage resistance of a permutation is implied by, but does not require, random oracle behavior. The Poseidon2 literature [2, 3] primarily analyzes the sponge construction, raising a natural question: does the round count $R_p = 22$ assume the existence of hidden capacity elements?
 
 **Round count is capacity-independent.** We verify from Plonky3's source [10] that the round number calculation depends on exactly four parameters: field prime $p$, state width $t$, S-box degree $d$, and security level $M$. Capacity does not appear. The six security constraints (statistical, interpolation, three Gröbner basis variants, and the algebraic bound from [15]) target the *permutation itself*—they bound the number of rounds needed to resist distinguishing attacks against $\pi$, not against a sponge construction built from $\pi$. Capacity $c$ is a separate, orthogonal parameter that determines sponge-mode security as $\min(\text{permutation security}, 2^{c/2})$. For compression function mode, only permutation security applies, and $R_p = 22$ (with margin $R_f += 2$, $R_p \times 1.075$) targets 128-bit permutation security directly.
 
-**Compression function mode risks.** While the round count is sound, operating without capacity has two consequences: (1) the full 744-bit state is visible, giving an attacker more information for algebraic cryptanalysis (e.g., CICO (Constrained-Input Constrained-Output) attacks [12] become formulated over the full state rather than a reduced output space); (2) there is no "safety net"—in sponge mode, even a partial permutation break may be absorbed by the capacity, whereas in compression mode any permutation weakness directly impacts security. We believe this risk is manageable because: (a) the 30-round configuration's algebraic properties (S-box degree growth, MDS diffusion) are mode-independent; (b) the Poseidon2 paper [3] explicitly recommends compression function mode for Merkle trees; (c) any attack on the sponge implies an attack on the compression function with equal or lower complexity, since the compression-mode attacker has strictly more information [3]. Conversely, compression-mode-specific attacks (exploiting visible capacity elements) do not necessarily transfer to sponge mode—making compression mode the more conservative security setting.
+**Compression function mode risks.** While the round count is sound, operating without capacity has two consequences: (1) the full 744-bit state is visible, giving an attacker more information for algebraic cryptanalysis (e.g., CICO (Constrained-Input Constrained-Output) attacks [12] become formulated over the full state rather than a reduced output space); (2) there is no "safety net"—in sponge mode, even a partial permutation break may be absorbed by the capacity, whereas in compression mode any permutation weakness directly impacts security. We believe this risk is manageable because: (a) the 30-round configuration's algebraic properties (S-box degree growth, MDS diffusion) are mode-independent; (b) the Poseidon2 paper [3] explicitly recommends compression function mode for Merkle trees; (c) any attack on the sponge implies an attack on the compression function with equal or lower complexity, since the compression-mode attacker has strictly more information [3]. Conversely, compression-mode-specific attacks (exploiting visible capacity elements) do not necessarily transfer to sponge mode—making compression mode the more demanding security setting to defend.
 
 **Single primitive dependency.**
 
@@ -495,10 +495,10 @@ No early-termination optimization exists: evaluating any ticket requires the ful
 
 ### 6.5 Quantum Resistance
 
-- Grover's algorithm halves effective hash bits: 248/2 = 124-bit quantum security
-- Comparable to SHA-256 under quantum attack (256/2 = 128 bits)
-- kHeavyHash: 256/2 = 128-bit quantum security
-- **Delta:** −8 bits classical (248 vs 256) / −4 bits quantum (124 vs 128). Both exceed the current NIST minimum of 112 bits (SP 800-131A Rev. 2) and BSI's 120-bit floor (TR-02102-1). The 4-bit shortfall relative to SHA-256 and the proposed NIST 128-bit floor (SP 800-131A Rev. 3 draft, 2030) is a known tradeoff of using the 248-bit M31 Poseidon2 output; if needed, full-state comparison (744-bit) provides ample margin.
+- Grover's algorithm halves effective hash bits: 248/2 = 124-bit quantum security.
+- Comparable to SHA-256 under quantum attack (256/2 = 128 bits).
+- kHeavyHash: 256/2 = 128-bit quantum security.
+- **Delta:** −8 bits classical (248 vs 256) / −4 bits quantum (124 vs 128). Both exceed the current NIST minimum of 112 bits (SP 800-131A Rev. 2) and BSI (German Federal Office for Information Security) 120-bit floor (TR-02102-1). The 4-bit shortfall relative to SHA-256 and the proposed NIST 128-bit floor (SP 800-131A Rev. 3 draft, 2030) is a known tradeoff of using the 248-bit M31 Poseidon2 output; if needed, full-state comparison (744-bit) provides ample margin.
 
 ---
 
@@ -506,7 +506,7 @@ No early-termination optimization exists: evaluating any ticket requires the ful
 
 A ZK-SPoW ASIC includes NTT units and memory infrastructure absent from a Pure PoW design. This die area overhead reduces hash/watt by a factor $\alpha > 1$ (the exact value depends on implementation; see Appendix A for one illustrative design). The economic question is whether ZK revenue compensates for this gap.
 
-**Revenue comparison.** Per-watt revenue:
+**Revenue comparison.** Per-miner revenue (assuming uniform hashrate):
 
 $$\text{ZK-SPoW} = \frac{\mathcal{H}_{spow}}{\mathcal{H}_{total}} \cdot B + Z \cdot F \quad \text{vs} \quad \text{Pure PoW} = \frac{\mathcal{H}_{pow}}{\mathcal{H}_{total}} \cdot B$$
 
@@ -535,12 +535,12 @@ Several proposals use ZK proof generation as useful work within PoW:
 **Proof-level ZK PoW [14].** This proposal treats proof completion as a lottery ticket—completing a STARK proof yields one PoW attempt. Two limitations arise. First, proofs take tens of milliseconds to seconds, making the scheme non-memoryless: miners closer to completion have a higher conditional probability of finding a block, violating the progress-free property (§2.1). Second, losing miners must discard their proofs—only the winner's proofs enter the chain. Under difficulty adjustment with $N$ competing miners, useful output is $\sim 1/N$ of total computation, converging toward Pure PoW.
 
 Granularity comparison:
-- **Proof-level**: 1 trial per tens of ms–seconds → non-memoryless, losing proofs wasted
-- **Permutation-level (ZK-SPoW)**: 1 trial per nanoseconds → PRP-memoryless, ZK work survives PoW failure
+- **Proof-level**: 1 trial per tens of ms–s → non-memoryless, losing proofs wasted
+- **Permutation-level (ZK-SPoW)**: 1 trial per nanosecond → PRP-memoryless, ZK work survives PoW failure
 
 **Ofelimos [7].** Performs combinatorial optimization (Doubly Parallel Local Search) as useful work in a provably secure PoUW framework, using SNARGs for efficient verification. The useful computation is protocol-mandated, not market-driven. Like ZK-SPoW, Ofelimos addresses the PoUW challenge formally, but operates in the "PoW → useful" direction with domain-specific verification.
 
-**Komargodski et al. [8].** Construct a PoUW protocol for arbitrary matrix multiplication with near-optimal overhead, enabling miners to repurpose GPU computation (e.g., AI training) for consensus. **Bar-On, Komargodski & Weinstein [9].** Analyze equilibrium dynamics when miners receive external economic rewards for useful computation alongside mining revenue. ZK-SPoW differs from [8] in that PoW tickets emerge as a byproduct of STARK hashing rather than through a separate verification protocol, and from [9] in that ZK revenue is a design-level property rather than an external market assumption.
+**Komargodski et al. [8]** (see §1.3 for details). ZK-SPoW differs in that PoW tickets emerge as a byproduct of STARK hashing rather than through a separate verification protocol. **Bar-On, Komargodski & Weinstein [9]** analyze equilibrium dynamics when miners receive external economic rewards for useful computation. ZK-SPoW differs in that ZK revenue is a design-level property rather than an external market assumption.
 
 ### 8.2 Sequential ZK-then-Hash (Nockchain)
 
@@ -762,7 +762,7 @@ $$P(C < T) = p_t$$
 $$P(A < T \wedge B < T \wedge C < T) = p_t^3$$
 $$P(A < T \vee B < T \vee C < T) = 1 - (1-p_t)^3 = 3p_t - 3p_t^2 + p_t^3$$
 
-The quantity $q = 1 - (1-p_t)^3$ used in §6.4 and Appendix B.2–B.5 is exact under PRP, not an approximation. ∎
+The quantity $q = 1 - (1-p_t)^3$ used in §6.4 and Appendix B.2–B.5 is exact in the ideal world and holds up to negligible distinguishing advantage under PRP. ∎
 
 ---
 
@@ -772,9 +772,9 @@ The quantity $q = 1 - (1-p_t)^3$ used in §6.4 and Appendix B.2–B.5 is exact u
 
 **Placeholder round constants.** All GPU experiments use the current Stwo implementation, which sets `EXTERNAL_ROUND_CONSTS` and `INTERNAL_ROUND_CONSTS` uniformly to `1234` (placeholder values). This does not affect throughput measurements—Poseidon2's computational cost (field multiplications, additions, MDS matrix application) is identical regardless of round constant values. However, output quality (pseudorandomness, collision resistance) under placeholder constants may differ from production parameters. The throughput results in §C.1 and §C.2 are valid; they should not be interpreted as security validation of the Poseidon2 instantiation.
 
-We implement a complete Width-24 Poseidon2 Circle STARK prover in CUDA—iCFFT/CFFT, Merkle tree commitment, constraint quotient, Fiat-Shamir, and FRI fold—as a single `stark.cu` file (~1600 lines). All Poseidon2 parameters match the paper specification: W=24, Rf=8, Rp=22, M31, compression function mode.
+We implement a complete Width-24 Poseidon2 Circle STARK prover in CUDA—iCFFT/CFFT (inverse/forward Circle Fast Fourier Transform), Merkle tree commitment, constraint quotient, Fiat-Shamir, and FRI fold—as a single `stark.cu` file (~1600 lines). All Poseidon2 parameters match the paper specification: W=24, Rf=8, Rp=22, M31, compression function mode.
 
-**Test environment:** NVIDIA GeForce RTX 4070 (46 SMs, 5483 CUDA cores, 1920 MHz base / 2475 MHz boost, 12 GB GDDR6X, 504 GB/s).
+**Test environment:** NVIDIA GeForce RTX 4070 Laptop GPU (36 SMs, 4608 CUDA cores, 1980 MHz boost, 8 GB GDDR6X).
 
 ### C.1 PoW Tickets as a Byproduct of ZK
 
@@ -819,7 +819,7 @@ Peak throughput: 136.39M PoW tickets/s at $\ell = 20$. At $\ell = 22$, STARK ove
 | 10 | 303.47 | 303.06 | 99.9% | M→R |
 | **Mean** | **305.15 ± 0.91** | **302.99 ± 0.20** | **99.3% ± 0.3%** | |
 
-95% CI for ratio: [99.1%, 99.5%]. Paired $t$-test: $t = -7.893$, $p < 0.001$ ($p \approx 2.5 \times 10^{-5}$, $df = 9$).
+95% confidence interval (CI) for ratio: [99.1%, 99.5%]. Paired $t$-test: $t = -7.893$, $p < 0.001$ ($p \approx 2.5 \times 10^{-5}$, $df = 9$).
 
 **Interpretation.** The difference is statistically significant ($p < 0.001$) but practically negligible (0.7%). The gap is attributable to GPU global memory I/O overhead in the Merkle kernel (16-word read + 8-word write per permutation), not to input-dependent Poseidon2 computation. Poseidon2's 30-round arithmetic dominates execution time regardless of input source. Execution order has no measurable effect. On ASIC (SRAM latency ~1 cycle vs GPU global memory ~hundreds of cycles), this I/O gap is expected to be substantially reduced.
 
@@ -849,7 +849,7 @@ Poseidon2 Width-24 output under sequential counter inputs passes all 15 NIST SP 
 | Random Excursions (8 states) | 8/8 pass | 0.0510† | PASS |
 | Random Excursions Variant (18 states) | 17/18 pass | 0.0320† | PASS |
 
-P-value$_T$: NIST SP 800-22 [17, §4.2.2] uniformity ($\chi^2$ on 10-bin histogram; pass if $> 0.0001$). †Worst across sub-tests. Non-overlapping Template: block count $= 8$, $M = 125{,}000$ per NIST STS 2.1.2. REV state $x = +3$: 53/56 (threshold 54), consistent with statistical fluctuation across 18 states. Linear Complexity: corrected $\pi_6 = 1/48$ (NIST STS 2.1.2 bug: $\pi_6 = 1/32$, $\sum \pi_i > 1$).
+P-value$_T$: NIST SP 800-22 [17, §4.2.2] uniformity ($\chi^2$ on 10-bin histogram; pass if $> 0.0001$). †Worst across sub-tests. Non-overlapping Template: block count $= 8$, $M = 125{,}000$ per NIST Statistical Test Suite (STS) 2.1.2. Random Excursions Variant (REV) state $x = +3$: 53/56 (threshold 54), consistent with statistical fluctuation across 18 states. Linear Complexity: corrected $\pi_6 = 1/48$ (NIST STS 2.1.2 bug: $\pi_6 = 1/32$, $\sum \pi_i > 1$).
 
 **Inter-ticket independence** (100,000 permutations, 3 tickets: S[0..7], S[8..15], S[16..23]):
 
@@ -867,7 +867,7 @@ This appendix contains the complete proof of Theorem 1 (§2.2) and supporting re
 
 **Setup.** Let $\pi: \mathbb{F}_p^{24} \to \mathbb{F}_p^{24}$ be the Width-24 Poseidon2 permutation. In a STARK Merkle commitment phase, the prover evaluates $\pi$ on inputs $x_1, \ldots, x_P$ where $x_j = (n_{L,j} \| n_{R,j} \| h_H)$, with $n_{L,j}, n_{R,j} \in \mathbb{F}_p^8$ (child hashes) and $h_H \in \mathbb{F}_p^8$ (fixed header digest). $P = \sum_{i=0}^{m}(N_i - 1)$ is the total internal Merkle node count.
 
-**Lemma (Input Distinctness).** In Circle STARK, leaf-level inputs are distinct by construction (evaluations at $2^\ell$ distinct domain points). At higher levels, a collision requires $\pi(x_j)[0:7] = \pi(x_{j'})[0:7]$ for distinct $x_j, x_{j'}$. Under PRP, this occurs with probability $\leq p^{-8}$ per pair. Union bound: $\Pr[\text{any collision}] < P^2/(2p^8) < 10^{-60}$ for $P \leq 10^7$. We condition on the "good event" $G$ (all inputs distinct).
+**Lemma (Input Distinctness).** In Circle STARK, leaf-level inputs are distinct by construction (evaluations at $2^\ell$ distinct domain points). At higher levels, a collision requires $\pi(x_j)[0..7] = \pi(x_{j'})[0..7]$ for distinct $x_j, x_{j'}$. Under PRP, this occurs with probability $\leq p^{-8}$ per pair. Union bound: $\Pr[\text{any collision}] < P^2/(2p^8) < 10^{-60}$ for $P \leq 10^7$. We condition on the "good event" $G$ (all inputs distinct).
 
 **Full proof of Theorem 1.**
 
@@ -875,7 +875,7 @@ This appendix contains the complete proof of Theorem 1 (§2.2) and supporting re
 
 *Ideal world.* Replace $\pi$ with a truly random function $f$. For distinct inputs, $f(x_1), \ldots, f(x_P)$ are independent and uniform over $\mathbb{F}_p^{24}$. Each output decomposes as $\mathbb{F}_p^8 \times \mathbb{F}_p^8 \times \mathbb{F}_p^8$ (product space), so the three ticket comparisons are independent with $\Pr[\text{ticket}_{j,k} < T] = T/p^8$. Hence $\{E_j\}$ are i.i.d. Bernoulli($q$) with $q = 1-(1-T/p^8)^3$.
 
-*Reduction.* Suppose a PPT adversary $\mathcal{A}$ distinguishes the real event sequence $(E_1, \ldots, E_P)$ from i.i.d. Bernoulli($q$) with advantage $\epsilon$. Construct a PRP distinguisher $\mathcal{D}^{\mathcal{O}}$ with oracle access to either $\pi$ or a random function $f$: $\mathcal{D}$ queries $\mathcal{O}(x_1), \ldots, \mathcal{O}(x_P)$, extracts ticket events $E_j = \{\exists\, k : \mathcal{O}(x_j)[8k:8k{+}8] < T\}$, and runs $\mathcal{A}$ on $(E_1, \ldots, E_P)$. When $\mathcal{O} = \pi$, the view is identical to the real world; when $\mathcal{O} = f$, the view is the ideal world (i.i.d. Bernoulli by the argument above). Hence $\mathcal{D}$ distinguishes $\pi$ from $f$ with the same advantage $\epsilon$, contradicting the PRP assumption. ∎
+*Reduction.* Suppose a PPT adversary $\mathcal{A}$ distinguishes the real event sequence $(E_1, \ldots, E_P)$ from i.i.d. Bernoulli($q$) with advantage $\epsilon$. Construct a PRP distinguisher $\mathcal{D}^{\mathcal{O}}$ with oracle access to either $\pi$ or a random function $f$: $\mathcal{D}$ queries $\mathcal{O}(x_1), \ldots, \mathcal{O}(x_P)$, extracts ticket events $E_j = \{\exists\, k : \mathcal{O}(x_j)[8k..8k{+}7] < T\}$, and runs $\mathcal{A}$ on $(E_1, \ldots, E_P)$. When $\mathcal{O} = \pi$, the view is identical to the real world; when $\mathcal{O} = f$, the view is the ideal world (i.i.d. Bernoulli by the argument above). Hence $\mathcal{D}$ distinguishes $\pi$ from $f$ with the same advantage $\epsilon$, contradicting the PRP assumption. ∎
 
 **PRP–PRF switching.** The statistical distance between a random permutation and a random function on $P$ queries is $\leq P^2/(2p^{24}) < 10^{-210}$ for $P = 10^7$. Absorbed into $\mathrm{negl}(\kappa)$.
 
@@ -895,11 +895,11 @@ This appendix contains the complete proof of Theorem 1 (§2.2) and supporting re
 
 [3] L. Grassi, D. Khovratovich, and M. Schofnegger, "Poseidon2: A Faster Version of the Poseidon Hash Function," IACR ePrint 2023/323, 2023. https://eprint.iacr.org/2023/323
 
-[4] StarkWare, "Stwo: A STARK Prover." https://github.com/starkware-libs/stwo
+[4] StarkWare, "Stwo: A STARK Prover." https://github.com/starkware-libs/stwo (accessed 2026-02-16).
 
 [5] Y. Sompolinsky and M. Sutton, "The DAG KNIGHT Protocol: A Parameterless Generalization of Nakamoto Consensus," IACR ePrint 2022/1494, 2022. https://eprint.iacr.org/2022/1494
 
-[6] Kaspa, "kHeavyHash Specification." https://github.com/kaspanet/rusty-kaspa
+[6] Kaspa, "kHeavyHash Specification." https://github.com/kaspanet/rusty-kaspa (accessed 2026-02-16).
 
 [7] M. Fitzi, A. Kiayias, G. Panagiotakos, and A. Russell, "Ofelimos: Combinatorial Optimization via Proof-of-Useful-Work," Crypto 2022. https://eprint.iacr.org/2021/1379
 
