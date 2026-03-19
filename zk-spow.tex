@@ -31,7 +31,7 @@
 
 % ============================================================
 \begin{abstract}
-Proof-of-work (PoW) blockchains expend energy solely for network security. Proof of Useful Work (PoUW) aims to reclaim this cost: recent constructions achieve provable security for matrix multiplication~\cite{komargodski2025} and combinatorial optimization~\cite{ofelimos}, building on the foundational framework of Ball et~al.~\cite{ball2017}, with Bar-On et~al.~\cite{baron2025} analyzing equilibrium dynamics. These advances operate in the direction PoW~$\to$~useful output, with protocol-enforced usefulness. A complementary direction---using ZK proof generation as useful work~\cite{oleksak2025}---faces a distinct challenge: stateful, multi-phase STARK proving yields trial intervals of tens of milliseconds to seconds, breaking the memoryless property required for Nakamoto consensus.
+Proof-of-work (PoW) blockchains expend energy solely for network security. Proof of Useful Work (PoUW) aims to reclaim this cost: recent constructions achieve provable security for matrix multiplication~\cite{komargodski2025} and combinatorial optimization~\cite{ofelimos}, building on the foundational framework of Ball et~al.~\cite{ball2017}, with Bar-On et~al.~\cite{baron2025} analyzing equilibrium dynamics. These advances operate in the direction PoW~$\to$~useful output, with protocol-enforced usefulness. A complementary direction---using ZK proof generation as useful work~\cite{oleksak2025}---faces a distinct challenge: stateful, multi-phase STARK (Scalable Transparent ARgument of Knowledge) proving yields trial intervals of tens of milliseconds to seconds, breaking the memoryless property required for Nakamoto consensus.
 
 \textbf{ZK-SPoW} (ZK-Symbiotic Proof of Work) addresses this challenge by inverting the relationship: instead of making PoW useful, useful STARK Merkle hashing naturally produces PoW tickets as a cryptographic byproduct of every Poseidon2 permutation. Under the pseudorandom permutation (PRP) assumption, each permutation is computationally indistinguishable from an independent Bernoulli trial at nanosecond granularity---restoring computational memorylessness at the permutation level, with bounded header staleness (\S\ref{sec:staleness}), without sacrificing useful computation. ZK proofs computed during mining remain useful to clients regardless of the miner's PoW outcome.
 
@@ -232,7 +232,7 @@ External rounds $R_f$ & 8 (4 + 4) \\
 Internal rounds $R_p$ & 14 \\
 S-box exponent & $d = 5$ \\
 Merkle hash & 2 permutations per node (sponge: absorb left[8], absorb right[8]) \\
-Commitment hash & Blake2s (base layer), Poseidon over Felt252 (252-bit field element) (recursive proofs) \\
+Commitment hash & Blake2s (base layer), Poseidon over Felt252 (252-bit field element; recursive proofs) \\
 \bottomrule
 \end{tabular}
 \caption{Stwo baseline Poseidon2 parameters.}
@@ -981,7 +981,7 @@ The quantity $q = 1 - (1-p_t)^3$ used in \S\ref{sec:triple-ticket} and Appendix~
 
 \textbf{Placeholder round constants.} All GPU experiments use the current Stwo implementation, which sets \texttt{EXTERNAL\_ROUND\_CONSTS} and \texttt{INTERNAL\_ROUND\_CONSTS} uniformly to \texttt{1234} (placeholder values). This does not affect throughput measurements---Poseidon2's computational cost (field multiplications, additions, MDS matrix application) is identical regardless of round constant values. However, output quality (pseudorandomness, collision resistance) under placeholder constants may differ from production parameters. The throughput results in \S\ref{sec:gpu-freetickets} and \S\ref{sec:gpu-invariance} are valid; they should not be interpreted as security validation of the Poseidon2 instantiation.
 
-We implement a complete Width-24 Poseidon2 Circle STARK prover in CUDA---iCFFT/CFFT (inverse/forward Circle Fast Fourier Transform), Merkle tree commitment, constraint quotient, Fiat-Shamir, and FRI fold---as a single \texttt{stark.cu} file (${\sim}1600$~lines). All Poseidon2 parameters match the paper specification: $W=24$, $R_f=8$, $R_p=22$, M31 field, compression function mode.
+We implement a complete Width-24 Poseidon2 Circle STARK prover in CUDA---iCFFT/CFFT (inverse/forward Circle Fast Fourier Transform), Merkle tree commitment, constraint quotient, Fiat-Shamir, and FRI fold---as a single \texttt{stark.cu} file (${\sim}1600$~lines). All Poseidon2 parameters match the paper specification: $W=24$, $R_f=8$, $R_p=22$, M31, compression function mode.
 
 \textbf{Test environment:} NVIDIA GeForce RTX~4070 Laptop GPU (36~SMs, 4608 CUDA cores, 1980\,MHz boost, 8\,GB GDDR6X).
 
